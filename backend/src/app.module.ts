@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProjectsModule } from './projects/projects.module';
 import { StagesModule } from './stages/stages.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { I18nModule } from './i18n/i18n.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ProjectsModule,
     StagesModule,
     WebhooksModule,
+    I18nModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

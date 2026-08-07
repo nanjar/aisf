@@ -1,0 +1,38 @@
+{
+  "menu": {
+    "dashboard": "Dasbor",
+    "projects": "Project",
+    "settings": "Pengaturan",
+    "logout": "Keluar"
+  },
+  "button": {
+    "approve": "Setujui",
+    "reject": "Tolak",
+    "download": "Unduh Project",
+    "createProject": "Buat Project",
+    "runWorkflow": "Jalankan Workflow"
+  },
+  "notification": {
+    "stageReady": "Tahap {{stage}} siap untuk direview",
+    "workflowCompleted": "Workflow selesai — project siap diunduh"
+  },
+  "validation": {
+    "required": "{{field}} wajib diisi",
+    "invalidEmail": "Format email tidak valid"
+  },
+  "error": {
+    "notFound": "Data tidak ditemukan",
+    "unauthorized": "Sesi Anda telah berakhir, silakan login kembali",
+    "serverError": "Terjadi kesalahan pada server"
+  },
+  "workflowStatus": {
+    "PENDING": "Menunggu",
+    "GENERATED": "Menunggu Persetujuan",
+    "APPROVED": "Disetujui",
+    "REJECTED": "Ditolak"
+  },
+  "setting": {
+    "language": "Bahasa",
+    "llmProvider": "Penyedia LLM"
+  }
+}

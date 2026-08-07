@@ -1,0 +1,38 @@
+{
+  "menu": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "settings": "Settings",
+    "logout": "Log out"
+  },
+  "button": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "download": "Download Project",
+    "createProject": "Create Project",
+    "runWorkflow": "Run Workflow"
+  },
+  "notification": {
+    "stageReady": "{{stage}} stage is ready for review",
+    "workflowCompleted": "Workflow completed — project is ready to download"
+  },
+  "validation": {
+    "required": "{{field}} is required",
+    "invalidEmail": "Invalid email format"
+  },
+  "error": {
+    "notFound": "Resource not found",
+    "unauthorized": "Your session has expired, please log in again",
+    "serverError": "An internal server error occurred"
+  },
+  "workflowStatus": {
+    "PENDING": "Pending",
+    "GENERATED": "Awaiting Approval",
+    "APPROVED": "Approved",
+    "REJECTED": "Rejected"
+  },
+  "setting": {
+    "language": "Language",
+    "llmProvider": "LLM Provider"
+  }
+}

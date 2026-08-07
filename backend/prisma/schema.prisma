@@ -29,13 +29,26 @@ enum StageKey {
   BACKEND
   FRONTEND
   QA
+  PACKAGE
+}
+
+// V1.1: cara user login. Google user tidak selalu punya passwordHash.
+enum AuthProvider {
+  LOCAL
+  GOOGLE
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           String       @id @default(uuid())
+  email        String       @unique
+  // V1.1: nullable — user yang login lewat Google tidak punya password lokal
+  passwordHash String?      @map("password_hash")
+  // V1.1: nama tampilan, diisi dari profil Google (atau null untuk user lokal lama)
+  name         String?
+  // V1.1: id akun Google, unik jika terisi
+  googleId     String?      @unique @map("google_id")
+  authProvider AuthProvider @default(LOCAL) @map("auth_provider")
+  createdAt    DateTime     @default(now()) @map("created_at")
 
   @@map("users")
 }
