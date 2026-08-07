@@ -8,17 +8,19 @@ import { DecideStageDto } from './dto/decide-stage.dto';
 export class StagesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, approverEmail: string) {
+  // V1.1.1: ownerId ditambahkan supaya user tidak bisa approve/reject project orang lain
+  // walau tahu UUID-nya secara langsung (sebelumnya endpoint ini TIDAK melakukan pengecekan
+  // kepemilikan sama sekali — siapa pun yang login bisa memutuskan tahap project siapa pun).
+  async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, ownerId: string, approverEmail: string) {
+    const project = await this.prisma.project.findFirst({ where: { id: projectId, ownerId } });
+    if (!project) throw new NotFoundException('Project tidak ditemukan');
+
     const stage = await this.prisma.artifactStage.findUnique({
       where: { projectId_stageKey: { projectId, stageKey } },
     });
     if (!stage) throw new NotFoundException('Stage tidak ditemukan');
 
     if (stage.status !== StageStatus.GENERATED) {
-      // Covers: not generated yet, or already decided. This is what stops
-      // the "clicked resume twice" problem from before — once a decision
-      // is recorded here, the resumeUrl is cleared and this guard blocks
-      // any further attempt to reuse it.
       throw new ConflictException(
         `Stage ini berstatus "${stage.status}" — tidak bisa diputuskan lagi.`,
       );

@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, getToken, clearToken, ApiError, type ProjectSummary } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 const STATUS_BADGE: Record<string, string> = {
   RUNNING: 'bg-track/15 text-track border-track/30',
@@ -21,6 +23,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,19 +51,33 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [load, router]);
 
+  function handleLogout() {
+    clearToken();
+    router.push('/login');
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
       <div className="flex items-center justify-between">
         <div>
           <p className="font-display text-xs uppercase tracking-widest text-track">AI Software Factory</p>
-          <h1 className="mt-1 text-2xl font-semibold text-ink">Ruang Kendali</h1>
+          <h1 className="mt-1 text-2xl font-semibold text-ink">{t('menu.dashboard')}</h1>
         </div>
-        <Link
-          href="/projects/new"
-          className="rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90"
-        >
-          + Project Baru
-        </Link>
+        <div className="flex items-center gap-3">
+          <LanguageSwitcher />
+          <Link
+            href="/projects/new"
+            className="rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90"
+          >
+            + {t('button.createProject')}
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="rounded-md border border-panelBorder px-3 py-2 text-sm text-inkMuted transition hover:border-stop/50 hover:text-stop"
+          >
+            {t('menu.logout')}
+          </button>
+        </div>
       </div>
 
       {error && <p className="mt-6 text-sm text-stop">{error}</p>}

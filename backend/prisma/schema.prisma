@@ -50,6 +50,9 @@ model User {
   authProvider AuthProvider @default(LOCAL) @map("auth_provider")
   createdAt    DateTime     @default(now()) @map("created_at")
 
+  // V1.1.1: kepemilikan project — perbaikan celah "semua user Google lihat semua project"
+  ownedProjects Project[] @relation("ProjectOwner")
+
   @@map("users")
 }
 
@@ -61,11 +64,18 @@ model Project {
   aiModel         String        @default("gpt-5-mini") @map("ai_model")
   status          ProjectStatus @default(RUNNING)
   n8nExecutionId  String?       @map("n8n_execution_id")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // V1.1.1: setiap project WAJIB punya pemilik. onDelete Restrict — sengaja tidak Cascade,
+  // supaya user tidak bisa terhapus tanpa sadar ikut menghapus semua project miliknya.
+  ownerId String @map("owner_id")
+  owner   User   @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   stages ArtifactStage[]
 
+  @@index([ownerId])
   @@map("projects")
 }
 

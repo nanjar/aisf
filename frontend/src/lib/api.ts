@@ -1,6 +1,8 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const TOKEN_KEY = 'asf_token';
 
+export { API_URL };
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -44,7 +46,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export type ProjectStatus = 'RUNNING' | 'COMPLETED' | 'REJECTED' | 'FAILED';
 export type StageStatus = 'PENDING' | 'GENERATED' | 'APPROVED' | 'REJECTED';
-export type StageKey = 'PRD' | 'ARCHITECTURE' | 'ESTIMATION' | 'DATABASE' | 'BACKEND' | 'FRONTEND' | 'QA';
+// V1.1: tambah PACKAGE (tahap Package Builder, ada gate approval seperti tahap lain)
+export type StageKey =
+  | 'PRD'
+  | 'ARCHITECTURE'
+  | 'ESTIMATION'
+  | 'DATABASE'
+  | 'BACKEND'
+  | 'FRONTEND'
+  | 'QA'
+  | 'PACKAGE';
 
 export interface ProjectSummary {
   id: string;
@@ -80,12 +91,28 @@ export interface ProjectDetail {
   stages: ProjectStage[];
 }
 
+/** V1.1: memicu download blob lewat elemen <a> sementara, lalu dibuang. */
+export function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ accessToken: string; user: { id: string; email: string } }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+
+  // V1.1: bukan fetch biasa — ini navigasi penuh browser ke halaman consent Google,
+  // jadi cukup kembalikan URL-nya, pemanggil yang set window.location.href.
+  googleLoginUrl: () => `${API_URL}/auth/google`,
 
   listProjects: () => request<ProjectSummary[]>('/projects'),
 
@@ -99,4 +126,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision, comment }),
     }),
+
+  // V1.1: respons bukan JSON (application/zip), jadi tidak lewat request() generik.
+  downloadProject: async (id: string): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/projects/${id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.message ?? `Gagal mengunduh (${res.status})`);
+    }
+    return res.blob();
+  },
 };

@@ -4,6 +4,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DecideStageDto } from './dto/decide-stage.dto';
 import { StagesService } from './stages.service';
 
+type AuthedRequest = Request & { user: { userId: string; email: string } };
+
 @Controller('projects/:projectId/stages')
 @UseGuards(JwtAuthGuard)
 export class StagesController {
@@ -14,8 +16,8 @@ export class StagesController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('stageKey') stageKey: StageKey,
     @Body() dto: DecideStageDto,
-    @Req() req: Request & { user: { email: string } },
+    @Req() req: AuthedRequest,
   ) {
-    return this.stagesService.decide(projectId, stageKey, dto, req.user.email);
+    return this.stagesService.decide(projectId, stageKey, dto, req.user.userId, req.user.email);
   }
 }

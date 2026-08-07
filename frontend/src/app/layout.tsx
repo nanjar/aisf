@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { JetBrains_Mono, Inter } from 'next/font/google';
 import './globals.css';
+import { I18nProvider } from '@/lib/i18n';
 
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', weight: ['400', '500', '700'] });
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans' });
@@ -13,7 +14,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id" className={`${mono.variable} ${sans.variable}`}>
-      <body className="min-h-screen bg-floor font-body text-ink antialiased">{children}</body>
+      <body className="min-h-screen bg-floor font-body text-ink antialiased">
+        <I18nProvider>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

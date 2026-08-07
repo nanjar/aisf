@@ -8,8 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { STAGE_LABELS, STAGE_ORDER } from '../common/stage-order';
 import { CreateProjectDto } from './dto/create-project.dto';
 
-// V1.1: nama file di dalam project.zip untuk tiap stage. Konten stage disimpan sebagai teks
-// di database (tidak ada object storage terpisah) — endpoint download menyusun zip on-the-fly.
 const ARTIFACT_FILE_NAMES: Record<string, string> = {
   PRD: 'prd.md',
   ARCHITECTURE: 'architecture.yaml',
@@ -28,13 +26,16 @@ export class ProjectsService {
     private readonly config: ConfigService,
   ) {}
 
-  async create(dto: CreateProjectDto) {
+  // V1.1.1: setiap project harus punya ownerId — diambil dari JWT user yang membuat, BUKAN
+  // dari body request (jangan pernah percaya client bisa memilih siapa pemiliknya sendiri).
+  async create(dto: CreateProjectDto, ownerId: string) {
     const project = await this.prisma.project.create({
       data: {
         name: dto.name,
         businessIdea: dto.businessIdea,
         knowledgeBaseId: dto.knowledgeBaseId,
         aiModel: dto.aiModel ?? 'gpt-5-mini',
+        ownerId,
         stages: {
           create: STAGE_ORDER.map((stageKey) => ({ stageKey, status: StageStatus.PENDING })),
         },
@@ -49,11 +50,9 @@ export class ProjectsService {
         businessIdea: project.businessIdea,
         knowledgeBaseId: project.knowledgeBaseId,
         aiModel: project.aiModel,
-        userId: 'app',
+        userId: ownerId,
       });
     } catch (err) {
-      // Project row stays as a record even if n8n couldn't be reached —
-      // surface the failure clearly instead of silently leaving it stuck.
       throw new BadGatewayException(
         `Project dibuat, tapi gagal memicu workflow n8n: ${(err as Error).message}`,
       );
@@ -62,17 +61,22 @@ export class ProjectsService {
     return this.withCurrentStage(project);
   }
 
-  async findAll() {
+  // V1.1.1: HANYA project milik user ini — bukan semua project di database.
+  async findAll(ownerId: string) {
     const projects = await this.prisma.project.findMany({
+      where: { ownerId },
       include: { stages: true },
       orderBy: { createdAt: 'desc' },
     });
     return projects.map((p) => this.withCurrentStage(p));
   }
 
-  async findOne(id: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id },
+  // V1.1.1: where: { id, ownerId } sekaligus — kalau project ada tapi bukan milik user ini,
+  // hasilnya SAMA seperti project tidak ada (404), bukan 403. Ini sengaja: tidak membocorkan
+  // informasi "project ini ada tapi bukan milikmu" ke user yang tidak berhak.
+  async findOne(id: string, ownerId: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { id, ownerId },
       include: { stages: true },
     });
     if (!project) throw new NotFoundException('Project tidak ditemukan');
@@ -89,9 +93,6 @@ export class ProjectsService {
         decidedBy: stage?.decidedBy ?? null,
         generatedAt: stage?.generatedAt ?? null,
         decidedAt: stage?.decidedAt ?? null,
-        // resumeUrl intentionally omitted from the read model — decisions
-        // go through this backend's own /decision endpoint, never exposed
-        // directly to the browser.
       };
     });
 
@@ -108,16 +109,9 @@ export class ProjectsService {
     };
   }
 
-  // ===== V1.1: download seluruh artifact sebagai project.zip =====
-  //
-  // Tidak ada object storage (MinIO) di V1 — konten tiap stage disimpan langsung sebagai teks
-  // di kolom `content`. Jadi "project.zip" disusun on-the-fly di sini dari isi database, bukan
-  // di-generate n8n lalu diambil dari storage. Ini konsisten dengan realita implementasi V1
-  // (lihat dokumentasi Section 7.1: artifact besar seperti backend/frontend sebenarnya adalah
-  // teks hasil LLM, bukan file biner asli).
-  async buildDownloadArchive(id: string): Promise<PassThrough> {
-    const project = await this.prisma.project.findUnique({
-      where: { id },
+  async buildDownloadArchive(id: string, ownerId: string): Promise<PassThrough> {
+    const project = await this.prisma.project.findFirst({
+      where: { id, ownerId },
       include: { stages: true },
     });
     if (!project) throw new NotFoundException('Project tidak ditemukan');
