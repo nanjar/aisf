@@ -1,0 +1,29 @@
+version: "3.8"
+
+# Reuses the existing PostgreSQL instance on the Tailscale mesh (e.g. "kuring")
+# — no db service defined here. Make sure DATABASE_URL in backend/.env points
+# to it (Tailscale hostname, not a public IP), and that this host is allowed
+# in Tailscale ACLs to reach the DB port.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: asf-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "127.0.0.1:6001:6001"   # bound to localhost — Apache reverse-proxies from here
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    container_name: asf-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6000:3000"   # bound to localhost — Apache reverse-proxies from here
+    depends_on:
+      - backend

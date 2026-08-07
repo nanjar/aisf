@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectStatus {
+  RUNNING
+  COMPLETED
+  REJECTED
+  FAILED
+}
+
+enum StageStatus {
+  PENDING
+  GENERATED
+  APPROVED
+  REJECTED
+}
+
+enum StageKey {
+  PRD
+  ARCHITECTURE
+  ESTIMATION
+  DATABASE
+  BACKEND
+  FRONTEND
+  QA
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Project {
+  id              String        @id @default(uuid())
+  name            String
+  businessIdea    String        @map("business_idea")
+  knowledgeBaseId String?       @map("knowledge_base_id")
+  aiModel         String        @default("gpt-5-mini") @map("ai_model")
+  status          ProjectStatus @default(RUNNING)
+  n8nExecutionId  String?       @map("n8n_execution_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  stages ArtifactStage[]
+
+  @@map("projects")
+}
+
+model ArtifactStage {
+  id           String      @id @default(uuid())
+  projectId    String      @map("project_id")
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stageKey     StageKey    @map("stage_key")
+  artifactName String?     @map("artifact_name")
+  content      String?
+  status       StageStatus @default(PENDING)
+  resumeUrl    String?     @map("resume_url")
+  comment      String?
+  decidedBy    String?     @map("decided_by")
+  generatedAt  DateTime?   @map("generated_at")
+  decidedAt    DateTime?   @map("decided_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@unique([projectId, stageKey])
+  @@index([projectId])
+  @@map("artifact_stages")
+}
