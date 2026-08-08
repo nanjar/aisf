@@ -1,24 +1,28 @@
 'use client';
 
-import { useI18n, type Lang } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n/I18nProvider';
 
-const LANGS: Lang[] = ['id', 'en'];
+const LANGS = [
+  { code: 'id', label: 'ID' },
+  { code: 'en', label: 'EN' },
+] as const;
 
 export function LanguageSwitcher() {
-  const { lang, setLang } = useI18n();
+  const { lang, setLang, t } = useI18n();
 
   return (
-    <div className="flex items-center gap-1 rounded-md border border-panelBorder bg-panel p-1 font-display text-[11px]">
-      {LANGS.map((l) => (
+    <div className="flex items-center gap-1 rounded-full border border-panelBorder bg-panel p-0.5">
+      <span className="sr-only">{t('setting.language')}</span>
+      {LANGS.map(({ code, label }) => (
         <button
-          key={l}
-          type="button"
-          onClick={() => setLang(l)}
-          className={`rounded px-2 py-1 uppercase transition ${
-            lang === l ? 'bg-track text-floor' : 'text-inkMuted hover:text-ink'
+          key={code}
+          onClick={() => setLang(code)}
+          aria-pressed={lang === code}
+          className={`rounded-full px-2.5 py-1 font-display text-[11px] transition ${
+            lang === code ? 'bg-track text-floor' : 'text-inkMuted hover:text-ink'
           }`}
         >
-          {l}
+          {label}
         </button>
       ))}
     </div>

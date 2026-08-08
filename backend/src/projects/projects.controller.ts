@@ -4,6 +4,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Body,
   Req,
   Res,
@@ -12,10 +13,14 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/rbac/roles.guard';
+import { Roles } from '../common/rbac/roles.decorator';
+import { OrgRole } from '@prisma/client';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { SetProjectDeadlineDto } from './dto/set-deadline.dto';
 import { ProjectsService } from './projects.service';
 
-type AuthedRequest = Request & { user: { userId: string; email: string } };
+type AuthedRequest = Request & { user: { userId: string } };
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
@@ -27,6 +32,7 @@ export class ProjectsController {
     return this.projectsService.create(dto, req.user.userId);
   }
 
+  // V1.2 (visibilitas per-assignment): MEMBER hanya lihat project yang relevan untuknya.
   @Get()
   findAll(@Req() req: AuthedRequest) {
     return this.projectsService.findAll(req.user.userId);
@@ -35,6 +41,13 @@ export class ProjectsController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthedRequest) {
     return this.projectsService.findOne(id, req.user.userId);
+  }
+
+  @Put(':id/deadline')
+  @UseGuards(RolesGuard)
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  setDeadline(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetProjectDeadlineDto) {
+    return this.projectsService.setDeadline(id, dto);
   }
 
   @Get(':id/download')

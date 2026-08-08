@@ -1,0 +1,136 @@
+{
+  "menu": {
+    "dashboard": "Dasbor",
+    "projects": "Project",
+    "settings": "Pengaturan",
+    "logout": "Keluar"
+  },
+  "button": {
+    "approve": "Setujui",
+    "reject": "Tolak",
+    "download": "Unduh Project",
+    "createProject": "Buat Project",
+    "runWorkflow": "Jalankan Workflow",
+    "requestRevision": "Minta Revisi"
+  },
+  "notification": {
+    "stageReady": "Tahap {{stage}} siap untuk direview",
+    "workflowCompleted": "Workflow selesai — project siap diunduh"
+  },
+  "validation": {
+    "required": "{{field}} wajib diisi",
+    "invalidEmail": "Format email tidak valid"
+  },
+  "error": {
+    "notFound": "Data tidak ditemukan",
+    "unauthorized": "Sesi Anda telah berakhir, silakan login kembali",
+    "serverError": "Terjadi kesalahan pada server",
+    "loadProjectsFailed": "Gagal memuat daftar project.",
+    "loadProjectFailed": "Gagal memuat project.",
+    "createProjectFailed": "Gagal membuat project.",
+    "loginFailed": "Gagal masuk. Coba lagi.",
+    "decisionFailed": "Gagal mengirim keputusan."
+  },
+  "workflowStatus": {
+    "PENDING": "Menunggu",
+    "GENERATED": "Menunggu Persetujuan",
+    "APPROVED": "Disetujui",
+    "REJECTED": "Ditolak"
+  },
+  "setting": {
+    "language": "Bahasa",
+    "llmProvider": "Penyedia LLM"
+  },
+  "meta": {
+    "appDescription": "Kendalikan pipeline AI Software Factory dari satu tempat."
+  },
+  "login": {
+    "heading": "Masuk ke ruang kendali",
+    "email": "Email",
+    "password": "Password",
+    "submitDefault": "Masuk",
+    "submitLoading": "Memproses…"
+  },
+  "dashboard": {
+    "heading": "Ruang Kendali",
+    "newProject": "+ Project Baru",
+    "loading": "Memuat…",
+    "empty": "Belum ada project. Mulai satu untuk melihat pipeline-nya berjalan.",
+    "currentStage": "Tahap saat ini: {{stage}}"
+  },
+  "projectStatus": {
+    "RUNNING": "Berjalan",
+    "COMPLETED": "Selesai",
+    "REJECTED": "Ditolak",
+    "FAILED": "Gagal"
+  },
+  "newProject": {
+    "back": "← Kembali",
+    "heading": "Project Baru",
+    "subheading": "Idenya akan langsung dikirim ke pipeline n8n dan mulai digarap oleh Business Analyst Agent.",
+    "nameLabel": "Nama project",
+    "namePlaceholder": "mis. Platform Toko Buku Online",
+    "ideaLabel": "Business idea",
+    "ideaPlaceholder": "Jelaskan idenya selengkap mungkin — target pengguna, fitur utama, batasan...",
+    "kbLabel": "Knowledge base ID (opsional)",
+    "modelLabel": "Model AI",
+    "submitDefault": "Mulai Pipeline",
+    "submitLoading": "Memulai pipeline…"
+  },
+  "projectDetail": {
+    "back": "← Semua project",
+    "loading": "Memuat…",
+    "noArtifact": "Belum ada artifact untuk tahap ini.",
+    "noteLabel": "Catatan:",
+    "commentPlaceholder": "Catatan (opsional) — alasan approve/reject",
+    "qaGeneratedDone": "Selesai digenerate",
+    "qaNoApprovalNeeded": "Tahap ini tidak memerlukan approval — workflow akan otomatis menyelesaikan project setelah QA selesai digenerate.",
+    "approverLabel": "Approver:",
+    "unassigned": "(Belum ditugaskan)",
+    "assignMemberGroup": "Anggota",
+    "assignTeamGroup": "Team",
+    "revisionNeedsComment": "Catatan wajib diisi untuk meminta revisi."
+  },
+  "stageStatus": {
+    "APPROVED": "Disetujui",
+    "GENERATED": "Menunggu keputusan",
+    "REJECTED": "Ditolak",
+    "PENDING": "Belum sampai giliran"
+  },
+  "team": {
+    "heading": "Tim",
+    "backToDashboard": "← Dasbor",
+    "membersHeading": "Anggota Organisasi",
+    "inviteHeading": "Undang Anggota",
+    "emailLabel": "Email",
+    "roleLabel": "Role",
+    "inviteButton": "Kirim Undangan",
+    "inviting": "Mengundang…",
+    "inviteSuccess": "Undangan terkirim.",
+    "resend": "Kirim Ulang",
+    "activate": "Aktifkan",
+    "deactivate": "Nonaktifkan",
+    "remove": "Hapus",
+    "statusInvited": "Diundang",
+    "statusActive": "Aktif",
+    "statusDeactivated": "Nonaktif",
+    "teamsHeading": "Teams",
+    "createTeamHeading": "Buat Team Baru",
+    "teamNameLabel": "Nama Team",
+    "teamNamePlaceholder": "mis. Backend Squad",
+    "teamDescLabel": "Deskripsi (opsional)",
+    "createTeamButton": "Buat Team",
+    "selectMember": "Pilih anggota…",
+    "addButton": "Tambah",
+    "noTeams": "Belum ada team dibuat. Anggota organisasi di atas tetap aktif meski belum dikelompokkan ke team mana pun.",
+    "noMembers": "Belum ada anggota.",
+    "notOwnerOrAdmin": "Hanya Owner/Admin yang bisa mengelola tim. Kamu bisa melihat daftar anggota dan team di bawah ini.",
+    "confirmRemoveMember": "Yakin hapus anggota ini dari organisasi?",
+    "confirmRemoveTeamMember": "Yakin keluarkan anggota ini dari team?",
+    "teamsSubheading": "Kelompokkan anggota organisasi ke dalam team (mis. \"Backend Squad\"). Anggota bisa ada di organisasi tanpa masuk team manapun.",
+    "assignmentsHeading": "Assignments",
+    "assignmentsSubheading": "Pilih project, lalu tentukan siapa (anggota atau team) yang berwenang approve tiap tahapnya.",
+    "selectProjectLabel": "Project",
+    "selectProjectPlaceholder": "Pilih project…"
+  }
+}

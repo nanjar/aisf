@@ -10,7 +10,8 @@
     "reject": "Reject",
     "download": "Download Project",
     "createProject": "Create Project",
-    "runWorkflow": "Run Workflow"
+    "runWorkflow": "Run Workflow",
+    "requestRevision": "Request Revision"
   },
   "notification": {
     "stageReady": "{{stage}} stage is ready for review",
@@ -23,7 +24,12 @@
   "error": {
     "notFound": "Resource not found",
     "unauthorized": "Your session has expired, please log in again",
-    "serverError": "An internal server error occurred"
+    "serverError": "An internal server error occurred",
+    "loadProjectsFailed": "Failed to load the project list.",
+    "loadProjectFailed": "Failed to load the project.",
+    "createProjectFailed": "Failed to create the project.",
+    "loginFailed": "Login failed. Please try again.",
+    "decisionFailed": "Failed to submit the decision."
   },
   "workflowStatus": {
     "PENDING": "Pending",
@@ -34,5 +40,101 @@
   "setting": {
     "language": "Language",
     "llmProvider": "LLM Provider"
+  },
+  "meta": {
+    "appDescription": "Control the AI Software Factory pipeline from one place."
+  },
+  "login": {
+    "heading": "Sign in to the control room",
+    "email": "Email",
+    "password": "Password",
+    "submitDefault": "Sign in",
+    "submitLoading": "Signing in…"
+  },
+  "dashboard": {
+    "heading": "Control Room",
+    "newProject": "+ New Project",
+    "loading": "Loading…",
+    "empty": "No projects yet. Start one to see the pipeline run.",
+    "currentStage": "Current stage: {{stage}}"
+  },
+  "projectStatus": {
+    "RUNNING": "Running",
+    "COMPLETED": "Completed",
+    "REJECTED": "Rejected",
+    "FAILED": "Failed"
+  },
+  "newProject": {
+    "back": "← Back",
+    "heading": "New Project",
+    "subheading": "The idea will be sent straight to the n8n pipeline and picked up by the Business Analyst Agent.",
+    "nameLabel": "Project name",
+    "namePlaceholder": "e.g. Online Bookstore Platform",
+    "ideaLabel": "Business idea",
+    "ideaPlaceholder": "Describe the idea in as much detail as possible — target users, key features, constraints...",
+    "kbLabel": "Knowledge base ID (optional)",
+    "modelLabel": "AI Model",
+    "submitDefault": "Start Pipeline",
+    "submitLoading": "Starting pipeline…"
+  },
+  "projectDetail": {
+    "back": "← All projects",
+    "loading": "Loading…",
+    "noArtifact": "No artifact for this stage yet.",
+    "noteLabel": "Note:",
+    "commentPlaceholder": "Note (optional) — reason for approve/reject",
+    "qaGeneratedDone": "Generation complete",
+    "qaNoApprovalNeeded": "This stage doesn't require approval — the workflow will automatically complete the project once QA finishes generating.",
+    "approverLabel": "Approver:",
+    "unassigned": "(Unassigned)",
+    "assignMemberGroup": "Members",
+    "assignTeamGroup": "Team",
+    "revisionNeedsComment": "A note is required to request a revision.",
+    "viewFromS3": "View from S3",
+    "noS3File": "No file stored in S3 for this stage yet."
+  },
+  "stageStatus": {
+    "APPROVED": "Approved",
+    "GENERATED": "Awaiting decision",
+    "REJECTED": "Rejected",
+    "PENDING": "Not started"
+  },
+  "team": {
+    "heading": "Team",
+    "backToDashboard": "← Dashboard",
+    "membersHeading": "Organization Members",
+    "inviteHeading": "Invite Member",
+    "emailLabel": "Email",
+    "roleLabel": "Role",
+    "inviteButton": "Send Invite",
+    "inviting": "Inviting…",
+    "inviteSuccess": "Invitation sent.",
+    "resend": "Resend",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "remove": "Remove",
+    "statusInvited": "Invited",
+    "statusActive": "Active",
+    "statusDeactivated": "Deactivated",
+    "teamsHeading": "Teams",
+    "createTeamHeading": "Create New Team",
+    "teamNameLabel": "Team Name",
+    "teamNamePlaceholder": "e.g. Backend Squad",
+    "teamDescLabel": "Description (optional)",
+    "createTeamButton": "Create Team",
+    "selectMember": "Select member…",
+    "addButton": "Add",
+    "noTeams": "No teams created yet. Organization members above are still active even without being grouped into a team.",
+    "noMembers": "No members yet.",
+    "notOwnerOrAdmin": "Only Owner/Admin can manage the team. You can view the member and team list below.",
+    "confirmRemoveMember": "Remove this member from the organization?",
+    "confirmRemoveTeamMember": "Remove this member from the team?",
+    "teamsSubheading": "Group organization members into teams (e.g. \"Backend Squad\"). Members can exist in the organization without belonging to any team.",
+    "assignmentsHeading": "Assignments",
+    "assignmentsSubheading": "Pick a project, then decide who (a member or a team) is responsible for approving each stage.",
+    "selectProjectLabel": "Project",
+    "selectProjectPlaceholder": "Select a project…",
+    "projectDeadlineLabel": "Project Deadline:",
+    "stageDeadlineLabel": "Deadline:"
   }
 }

@@ -3,10 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as archiver from 'archiver';
 import { PassThrough } from 'stream';
-import { ProjectStatus, StageStatus } from '@prisma/client';
+import { OrgRole, ProjectStatus, StageStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { STAGE_LABELS, STAGE_ORDER } from '../common/stage-order';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { SetProjectDeadlineDto } from './dto/set-deadline.dto';
 
 const ARTIFACT_FILE_NAMES: Record<string, string> = {
   PRD: 'prd.md',
@@ -26,16 +27,21 @@ export class ProjectsService {
     private readonly config: ConfigService,
   ) {}
 
-  // V1.1.1: setiap project harus punya ownerId — diambil dari JWT user yang membuat, BUKAN
-  // dari body request (jangan pernah percaya client bisa memilih siapa pemiliknya sendiri).
-  async create(dto: CreateProjectDto, ownerId: string) {
+  async create(dto: CreateProjectDto, createdById: string) {
+    const membership = await this.prisma.organizationMember.findFirst({
+      where: { userId: createdById, status: 'ACTIVE' },
+      orderBy: { invitedAt: 'asc' },
+      select: { organizationId: true },
+    });
+
     const project = await this.prisma.project.create({
       data: {
         name: dto.name,
         businessIdea: dto.businessIdea,
         knowledgeBaseId: dto.knowledgeBaseId,
         aiModel: dto.aiModel ?? 'gpt-5-mini',
-        ownerId,
+        organizationId: membership?.organizationId,
+        createdById,
         stages: {
           create: STAGE_ORDER.map((stageKey) => ({ stageKey, status: StageStatus.PENDING })),
         },
@@ -50,7 +56,7 @@ export class ProjectsService {
         businessIdea: project.businessIdea,
         knowledgeBaseId: project.knowledgeBaseId,
         aiModel: project.aiModel,
-        userId: ownerId,
+        userId: createdById,
       });
     } catch (err) {
       throw new BadGatewayException(
@@ -61,28 +67,59 @@ export class ProjectsService {
     return this.withCurrentStage(project);
   }
 
-  // V1.1.1: HANYA project milik user ini — bukan semua project di database.
-  async findAll(ownerId: string) {
+  setDeadline(id: string, dto: SetProjectDeadlineDto) {
+    return this.prisma.project.update({ where: { id }, data: { deadlineAt: new Date(dto.deadlineAt) } });
+  }
+
+  async findAll(userId: string) {
+    const member = await this.resolvePrimaryMembership(userId);
+    if (!member) return [];
+
+    const accessibleIds = await this.getAccessibleProjectIds(member.organizationId, member);
+
     const projects = await this.prisma.project.findMany({
-      where: { ownerId },
+      where: {
+        organizationId: member.organizationId,
+        ...(accessibleIds ? { id: { in: accessibleIds } } : {}),
+      },
       include: { stages: true },
       orderBy: { createdAt: 'desc' },
     });
     return projects.map((p) => this.withCurrentStage(p));
   }
 
-  // V1.1.1: where: { id, ownerId } sekaligus — kalau project ada tapi bukan milik user ini,
-  // hasilnya SAMA seperti project tidak ada (404), bukan 403. Ini sengaja: tidak membocorkan
-  // informasi "project ini ada tapi bukan milikmu" ke user yang tidak berhak.
-  async findOne(id: string, ownerId: string) {
-    const project = await this.prisma.project.findFirst({
-      where: { id, ownerId },
-      include: { stages: true },
+  async findOne(id: string, userId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id },
+      include: {
+        stages: true,
+        stageAssignments: {
+          include: {
+            assignedMember: { include: { user: { select: { id: true, email: true, name: true } } } },
+            assignedTeam: true,
+          },
+        },
+      },
     });
     if (!project) throw new NotFoundException('Project tidak ditemukan');
 
+    await this.assertVisibleToMember(project.id, project.organizationId, userId);
+
     const stages = STAGE_ORDER.map((stageKey) => {
       const stage = project.stages.find((s) => s.stageKey === stageKey);
+      const assignment = project.stageAssignments.find((a) => a.stageKey === stageKey);
+
+      let assignedTo: { type: 'member' | 'team'; id: string; label: string } | null = null;
+      if (assignment?.assignedMemberId && assignment.assignedMember) {
+        assignedTo = {
+          type: 'member',
+          id: assignment.assignedMemberId,
+          label: assignment.assignedMember.user.name ?? assignment.assignedMember.user.email,
+        };
+      } else if (assignment?.assignedTeamId && assignment.assignedTeam) {
+        assignedTo = { type: 'team', id: assignment.assignedTeamId, label: assignment.assignedTeam.name };
+      }
+
       return {
         stageKey,
         label: STAGE_LABELS[stageKey],
@@ -93,6 +130,10 @@ export class ProjectsService {
         decidedBy: stage?.decidedBy ?? null,
         generatedAt: stage?.generatedAt ?? null,
         decidedAt: stage?.decidedAt ?? null,
+        assignedTo,
+        // V1.2: deadline per-stage (FR-803) — backend endpoint sudah ada sejak sebelumnya,
+        // ini baru pertama kali diekspos di read model supaya frontend bisa menampilkannya.
+        deadlineAt: stage?.deadlineAt?.toISOString() ?? null,
       };
     });
 
@@ -103,18 +144,23 @@ export class ProjectsService {
       knowledgeBaseId: project.knowledgeBaseId,
       aiModel: project.aiModel,
       status: project.status,
+      organizationId: project.organizationId,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
+      // V1.2: deadline tingkat project (FR-802)
+      deadlineAt: project.deadlineAt?.toISOString() ?? null,
       stages,
     };
   }
 
-  async buildDownloadArchive(id: string, ownerId: string): Promise<PassThrough> {
-    const project = await this.prisma.project.findFirst({
-      where: { id, ownerId },
+  async buildDownloadArchive(id: string, userId: string): Promise<PassThrough> {
+    const project = await this.prisma.project.findUnique({
+      where: { id },
       include: { stages: true },
     });
     if (!project) throw new NotFoundException('Project tidak ditemukan');
+
+    await this.assertVisibleToMember(project.id, project.organizationId, userId);
 
     if (project.status !== ProjectStatus.COMPLETED) {
       throw new BadRequestException(
@@ -149,6 +195,51 @@ export class ProjectsService {
     return output;
   }
 
+  private async resolvePrimaryMembership(userId: string) {
+    return this.prisma.organizationMember.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      orderBy: { invitedAt: 'asc' },
+    });
+  }
+
+  private async getAccessibleProjectIds(
+    organizationId: string,
+    member: { id: string; role: OrgRole },
+  ): Promise<string[] | null> {
+    if (member.role !== OrgRole.MEMBER) return null;
+
+    const teamMemberships = await this.prisma.teamMember.findMany({
+      where: { organizationMemberId: member.id },
+      select: { teamId: true },
+    });
+    const teamIds = teamMemberships.map((t) => t.teamId);
+
+    const assignments = await this.prisma.stageAssignment.findMany({
+      where: {
+        project: { organizationId },
+        OR: [
+          { assignedMemberId: member.id },
+          ...(teamIds.length ? [{ assignedTeamId: { in: teamIds } }] : []),
+        ],
+      },
+      select: { projectId: true },
+      distinct: ['projectId'],
+    });
+
+    return assignments.map((a) => a.projectId);
+  }
+
+  private async assertVisibleToMember(projectId: string, organizationId: string | null, userId: string) {
+    const member = await this.resolvePrimaryMembership(userId);
+    if (!member || !organizationId || member.organizationId !== organizationId) return;
+    if (member.role !== OrgRole.MEMBER) return;
+
+    const accessibleIds = await this.getAccessibleProjectIds(organizationId, member);
+    if (!accessibleIds?.includes(projectId)) {
+      throw new NotFoundException('Project tidak ditemukan');
+    }
+  }
+
   private withCurrentStage(project: { stages: { stageKey: string; status: StageStatus }[] } & Record<string, any>) {
     const currentStage =
       STAGE_ORDER.find((key) => {
@@ -164,7 +255,9 @@ export class ProjectsService {
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
       currentStage,
-      currentStageLabel: currentStage ? STAGE_LABELS[currentStage] : 'Selesai',
+      currentStageLabel: currentStage ? STAGE_LABELS[currentStage] : null,
+      // V1.2: dipakai badge deadline di dashboard
+      deadlineAt: project.deadlineAt?.toISOString() ?? null,
     };
   }
 }

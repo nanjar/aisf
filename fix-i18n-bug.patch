@@ -1,0 +1,896 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 3fbf97e..1fe1d7f 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -48,6 +48,11 @@ model User {
+   // V1.1: id akun Google, unik jika terisi
+   googleId     String?      @unique @map("google_id")
+   authProvider AuthProvider @default(LOCAL) @map("auth_provider")
++  // BUGFIX (bahasa tidak konsisten): kolom ini sebelumnya tidak pernah dibuat meski
++  // sudah disebut di Dokumentasi V1.1 §5.1 ("tersimpan di JWT/preferensi user").
++  // Frontend TIDAK bergantung pada kolom ini untuk switching langsung (itu localStorage,
++  // lihat frontend/src/lib/i18n) — ini hanya untuk preferensi lintas-device/re-login.
++  preferredLanguage String  @default("id") @map("preferred_language")
+   createdAt    DateTime     @default(now()) @map("created_at")
+ 
+   @@map("users")
+diff --git a/backend/src/auth/auth.controller.ts b/backend/src/auth/auth.controller.ts
+index 9c424ca..82d08dc 100644
+--- a/backend/src/auth/auth.controller.ts
++++ b/backend/src/auth/auth.controller.ts
+@@ -39,6 +39,18 @@ export class AuthController {
+     return req.user;
+   }
+ 
++  // BUGFIX (bahasa tidak konsisten): endpoint baru — sebelumnya tidak ada
++  // tempat menyimpan preferensi bahasa user sama sekali.
++  @Post('me/language')
++  @UseGuards(JwtAuthGuard)
++  @HttpCode(HttpStatus.OK)
++  updateLanguage(
++    @Req() req: Request & { user: { userId: string } },
++    @Body() body: { lang: 'id' | 'en' },
++  ) {
++    return this.authService.updatePreferredLanguage(req.user.userId, body.lang);
++  }
++
+   // ===== V1.1: Google OAuth =====
+ 
+   @Get('google')
+diff --git a/backend/src/auth/auth.service.ts b/backend/src/auth/auth.service.ts
+index bdd580d..759b513 100644
+--- a/backend/src/auth/auth.service.ts
++++ b/backend/src/auth/auth.service.ts
+@@ -85,4 +85,19 @@ export class AuthService implements OnModuleInit {
+       },
+     });
+   }
++
++  /**
++   * BUGFIX (bahasa tidak konsisten): persist preferensi bahasa user supaya
++   * konsisten lintas-device/re-login. Switching langsung di UI TIDAK
++   * menunggu call ini — lihat frontend/src/lib/i18n/I18nProvider.tsx, yang
++   * menerapkan bahasa dari localStorage dulu lalu memanggil ini secara
++   * fire-and-forget.
++   */
++  async updatePreferredLanguage(userId: string, lang: 'id' | 'en') {
++    return this.prisma.user.update({
++      where: { id: userId },
++      data: { preferredLanguage: lang },
++      select: { id: true, preferredLanguage: true },
++    });
++  }
+ }
+diff --git a/backend/src/i18n/locales/en.json b/backend/src/i18n/locales/en.json
+index 109e415..2435fc2 100644
+--- a/backend/src/i18n/locales/en.json
++++ b/backend/src/i18n/locales/en.json
+@@ -23,7 +23,12 @@
+   "error": {
+     "notFound": "Resource not found",
+     "unauthorized": "Your session has expired, please log in again",
+-    "serverError": "An internal server error occurred"
++    "serverError": "An internal server error occurred",
++    "loadProjectsFailed": "Failed to load the project list.",
++    "loadProjectFailed": "Failed to load the project.",
++    "createProjectFailed": "Failed to create the project.",
++    "loginFailed": "Login failed. Please try again.",
++    "decisionFailed": "Failed to submit the decision."
+   },
+   "workflowStatus": {
+     "PENDING": "Pending",
+@@ -34,5 +39,56 @@
+   "setting": {
+     "language": "Language",
+     "llmProvider": "LLM Provider"
++  },
++  "meta": {
++    "appDescription": "Control the AI Software Factory pipeline from one place."
++  },
++  "login": {
++    "heading": "Sign in to the control room",
++    "email": "Email",
++    "password": "Password",
++    "submitDefault": "Sign in",
++    "submitLoading": "Signing in…"
++  },
++  "dashboard": {
++    "heading": "Control Room",
++    "newProject": "+ New Project",
++    "loading": "Loading…",
++    "empty": "No projects yet. Start one to see the pipeline run.",
++    "currentStage": "Current stage: {{stage}}"
++  },
++  "projectStatus": {
++    "RUNNING": "Running",
++    "COMPLETED": "Completed",
++    "REJECTED": "Rejected",
++    "FAILED": "Failed"
++  },
++  "newProject": {
++    "back": "← Back",
++    "heading": "New Project",
++    "subheading": "The idea goes straight into the n8n pipeline and starts with the Business Analyst Agent.",
++    "nameLabel": "Project name",
++    "namePlaceholder": "e.g. Online Bookstore Platform",
++    "ideaLabel": "Business idea",
++    "ideaPlaceholder": "Describe it in as much detail as possible — target users, key features, constraints...",
++    "kbLabel": "Knowledge base ID (optional)",
++    "modelLabel": "AI model",
++    "submitDefault": "Start Pipeline",
++    "submitLoading": "Starting pipeline…"
++  },
++  "projectDetail": {
++    "back": "← All projects",
++    "loading": "Loading…",
++    "noArtifact": "No artifact for this stage yet.",
++    "noteLabel": "Note:",
++    "commentPlaceholder": "Note (optional) — reason for approving/rejecting",
++    "qaGeneratedDone": "Generation complete",
++    "qaNoApprovalNeeded": "This stage doesn't need approval — the workflow completes the project automatically once QA finishes generating."
++  },
++  "stageStatus": {
++    "APPROVED": "Approved",
++    "GENERATED": "Awaiting decision",
++    "REJECTED": "Rejected",
++    "PENDING": "Not started yet"
+   }
+ }
+diff --git a/backend/src/i18n/locales/id.json b/backend/src/i18n/locales/id.json
+index 5aba43a..c6dcf8e 100644
+--- a/backend/src/i18n/locales/id.json
++++ b/backend/src/i18n/locales/id.json
+@@ -23,7 +23,12 @@
+   "error": {
+     "notFound": "Data tidak ditemukan",
+     "unauthorized": "Sesi Anda telah berakhir, silakan login kembali",
+-    "serverError": "Terjadi kesalahan pada server"
++    "serverError": "Terjadi kesalahan pada server",
++    "loadProjectsFailed": "Gagal memuat daftar project.",
++    "loadProjectFailed": "Gagal memuat project.",
++    "createProjectFailed": "Gagal membuat project.",
++    "loginFailed": "Gagal masuk. Coba lagi.",
++    "decisionFailed": "Gagal mengirim keputusan."
+   },
+   "workflowStatus": {
+     "PENDING": "Menunggu",
+@@ -34,5 +39,56 @@
+   "setting": {
+     "language": "Bahasa",
+     "llmProvider": "Penyedia LLM"
++  },
++  "meta": {
++    "appDescription": "Kendalikan pipeline AI Software Factory dari satu tempat."
++  },
++  "login": {
++    "heading": "Masuk ke ruang kendali",
++    "email": "Email",
++    "password": "Password",
++    "submitDefault": "Masuk",
++    "submitLoading": "Memproses…"
++  },
++  "dashboard": {
++    "heading": "Ruang Kendali",
++    "newProject": "+ Project Baru",
++    "loading": "Memuat…",
++    "empty": "Belum ada project. Mulai satu untuk melihat pipeline-nya berjalan.",
++    "currentStage": "Tahap saat ini: {{stage}}"
++  },
++  "projectStatus": {
++    "RUNNING": "Berjalan",
++    "COMPLETED": "Selesai",
++    "REJECTED": "Ditolak",
++    "FAILED": "Gagal"
++  },
++  "newProject": {
++    "back": "← Kembali",
++    "heading": "Project Baru",
++    "subheading": "Idenya akan langsung dikirim ke pipeline n8n dan mulai digarap oleh Business Analyst Agent.",
++    "nameLabel": "Nama project",
++    "namePlaceholder": "mis. Platform Toko Buku Online",
++    "ideaLabel": "Business idea",
++    "ideaPlaceholder": "Jelaskan idenya selengkap mungkin — target pengguna, fitur utama, batasan...",
++    "kbLabel": "Knowledge base ID (opsional)",
++    "modelLabel": "Model AI",
++    "submitDefault": "Mulai Pipeline",
++    "submitLoading": "Memulai pipeline…"
++  },
++  "projectDetail": {
++    "back": "← Semua project",
++    "loading": "Memuat…",
++    "noArtifact": "Belum ada artifact untuk tahap ini.",
++    "noteLabel": "Catatan:",
++    "commentPlaceholder": "Catatan (opsional) — alasan approve/reject",
++    "qaGeneratedDone": "Selesai digenerate",
++    "qaNoApprovalNeeded": "Tahap ini tidak memerlukan approval — workflow akan otomatis menyelesaikan project setelah QA selesai digenerate."
++  },
++  "stageStatus": {
++    "APPROVED": "Disetujui",
++    "GENERATED": "Menunggu keputusan",
++    "REJECTED": "Ditolak",
++    "PENDING": "Belum sampai giliran"
+   }
+ }
+diff --git a/backend/src/projects/projects.service.ts b/backend/src/projects/projects.service.ts
+index a6a8c3a..126f295 100644
+--- a/backend/src/projects/projects.service.ts
++++ b/backend/src/projects/projects.service.ts
+@@ -170,7 +170,7 @@ export class ProjectsService {
+       createdAt: project.createdAt,
+       updatedAt: project.updatedAt,
+       currentStage,
+-      currentStageLabel: currentStage ? STAGE_LABELS[currentStage] : 'Selesai',
++      currentStageLabel: currentStage ? STAGE_LABELS[currentStage] : null, // BUGFIX: was hardcoded 'Selesai'
+     };
+   }
+ }
+diff --git a/frontend/src/app/layout.tsx b/frontend/src/app/layout.tsx
+index 3740290..61c31eb 100644
+--- a/frontend/src/app/layout.tsx
++++ b/frontend/src/app/layout.tsx
+@@ -1,19 +1,27 @@
+ import type { Metadata } from 'next';
+ import { JetBrains_Mono, Inter } from 'next/font/google';
+ import './globals.css';
++import { I18nProvider } from '@/lib/i18n/I18nProvider';
+ 
+ const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', weight: ['400', '500', '700'] });
+ const sans = Inter({ subsets: ['latin'], variable: '--font-sans' });
+ 
+ export const metadata: Metadata = {
+   title: 'AI Software Factory',
++  // BUGFIX: this description was hardcoded Indonesian and renders before any
++  // client code runs, so it can never follow the language switch — metadata
++  // is inherently server-rendered. Left as the default-language fallback;
++  // true localized <title>/meta would need a server-side read of a language
++  // cookie, which is a separate follow-up beyond this bugfix.
+   description: 'Kendalikan pipeline AI Software Factory dari satu tempat.',
+ };
+ 
+ export default function RootLayout({ children }: { children: React.ReactNode }) {
+   return (
+     <html lang="id" className={`${mono.variable} ${sans.variable}`}>
+-      <body className="min-h-screen bg-floor font-body text-ink antialiased">{children}</body>
++      <body className="min-h-screen bg-floor font-body text-ink antialiased">
++        <I18nProvider>{children}</I18nProvider>
++      </body>
+     </html>
+   );
+ }
+diff --git a/frontend/src/app/login/page.tsx b/frontend/src/app/login/page.tsx
+index 8452e34..d0f556d 100644
+--- a/frontend/src/app/login/page.tsx
++++ b/frontend/src/app/login/page.tsx
+@@ -3,9 +3,12 @@
+ import { useState } from 'react';
+ import { useRouter } from 'next/navigation';
+ import { api, setToken, ApiError } from '@/lib/api';
++import { useI18n } from '@/lib/i18n/I18nProvider';
++import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+ 
+ export default function LoginPage() {
+   const router = useRouter();
++  const { t } = useI18n();
+   const [email, setEmail] = useState('');
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+@@ -20,7 +23,7 @@ export default function LoginPage() {
+       setToken(accessToken);
+       router.push('/');
+     } catch (err) {
+-      setError(err instanceof ApiError ? err.message : 'Gagal masuk. Coba lagi.');
++      setError(err instanceof ApiError ? err.message : t('error.loginFailed'));
+     } finally {
+       setLoading(false);
+     }
+@@ -28,13 +31,16 @@ export default function LoginPage() {
+ 
+   return (
+     <main className="flex min-h-screen items-center justify-center px-4">
++      <div className="absolute right-4 top-4">
++        <LanguageSwitcher />
++      </div>
+       <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-panelBorder bg-panel p-8">
+         <p className="font-display text-xs uppercase tracking-widest text-track">AI Software Factory</p>
+-        <h1 className="mt-2 text-xl font-semibold text-ink">Masuk ke ruang kendali</h1>
++        <h1 className="mt-2 text-xl font-semibold text-ink">{t('login.heading')}</h1>
+ 
+         <div className="mt-6 space-y-4">
+           <div>
+-            <label className="mb-1 block text-sm text-inkMuted">Email</label>
++            <label className="mb-1 block text-sm text-inkMuted">{t('login.email')}</label>
+             <input
+               type="email"
+               required
+@@ -44,7 +50,7 @@ export default function LoginPage() {
+             />
+           </div>
+           <div>
+-            <label className="mb-1 block text-sm text-inkMuted">Password</label>
++            <label className="mb-1 block text-sm text-inkMuted">{t('login.password')}</label>
+             <input
+               type="password"
+               required
+@@ -62,7 +68,7 @@ export default function LoginPage() {
+           disabled={loading}
+           className="mt-6 w-full rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
+         >
+-          {loading ? 'Memproses…' : 'Masuk'}
++          {loading ? t('login.submitLoading') : t('login.submitDefault')}
+         </button>
+       </form>
+     </main>
+diff --git a/frontend/src/app/page.tsx b/frontend/src/app/page.tsx
+index bd59b5c..2c33b56 100644
+--- a/frontend/src/app/page.tsx
++++ b/frontend/src/app/page.tsx
+@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
+ import Link from 'next/link';
+ import { useRouter } from 'next/navigation';
+ import { api, getToken, clearToken, ApiError, type ProjectSummary } from '@/lib/api';
++import { useI18n } from '@/lib/i18n/I18nProvider';
++import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+ 
+ const STATUS_BADGE: Record<string, string> = {
+   RUNNING: 'bg-track/15 text-track border-track/30',
+@@ -12,15 +14,9 @@ const STATUS_BADGE: Record<string, string> = {
+   FAILED: 'bg-stop/15 text-stop border-stop/30',
+ };
+ 
+-const STATUS_TEXT: Record<string, string> = {
+-  RUNNING: 'Berjalan',
+-  COMPLETED: 'Selesai',
+-  REJECTED: 'Ditolak',
+-  FAILED: 'Gagal',
+-};
+-
+ export default function DashboardPage() {
+   const router = useRouter();
++  const { t } = useI18n();
+   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+   const [error, setError] = useState<string | null>(null);
+ 
+@@ -34,9 +30,9 @@ export default function DashboardPage() {
+         router.push('/login');
+         return;
+       }
+-      setError(err instanceof ApiError ? err.message : 'Gagal memuat daftar project.');
++      setError(err instanceof ApiError ? err.message : t('error.loadProjectsFailed'));
+     }
+-  }, [router]);
++  }, [router, t]);
+ 
+   useEffect(() => {
+     if (!getToken()) {
+@@ -53,26 +49,27 @@ export default function DashboardPage() {
+       <div className="flex items-center justify-between">
+         <div>
+           <p className="font-display text-xs uppercase tracking-widest text-track">AI Software Factory</p>
+-          <h1 className="mt-1 text-2xl font-semibold text-ink">Ruang Kendali</h1>
++          <h1 className="mt-1 text-2xl font-semibold text-ink">{t('dashboard.heading')}</h1>
++        </div>
++        <div className="flex items-center gap-3">
++          <LanguageSwitcher />
++          <Link
++            href="/projects/new"
++            className="rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90"
++          >
++            {t('dashboard.newProject')}
++          </Link>
+         </div>
+-        <Link
+-          href="/projects/new"
+-          className="rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90"
+-        >
+-          + Project Baru
+-        </Link>
+       </div>
+ 
+       {error && <p className="mt-6 text-sm text-stop">{error}</p>}
+ 
+       <div className="mt-8 space-y-3">
+-        {projects === null && !error && <p className="text-sm text-inkMuted">Memuat…</p>}
++        {projects === null && !error && <p className="text-sm text-inkMuted">{t('dashboard.loading')}</p>}
+ 
+         {projects?.length === 0 && (
+           <div className="rounded-lg border border-dashed border-panelBorder p-10 text-center">
+-            <p className="text-sm text-inkMuted">
+-              Belum ada project. Mulai satu untuk melihat pipeline-nya berjalan.
+-            </p>
++            <p className="text-sm text-inkMuted">{t('dashboard.empty')}</p>
+           </div>
+         )}
+ 
+@@ -84,12 +81,14 @@ export default function DashboardPage() {
+           >
+             <div>
+               <p className="font-medium text-ink">{p.name}</p>
+-              <p className="mt-0.5 font-display text-xs text-inkMuted">
+-                Tahap saat ini: {p.currentStageLabel}
+-              </p>
++              {p.currentStageLabel && (
++                <p className="mt-0.5 font-display text-xs text-inkMuted">
++                  {t('dashboard.currentStage', { stage: p.currentStageLabel })}
++                </p>
++              )}
+             </div>
+             <span className={`rounded-full border px-3 py-1 font-display text-[11px] ${STATUS_BADGE[p.status]}`}>
+-              {STATUS_TEXT[p.status]}
++              {t(`projectStatus.${p.status}`)}
+             </span>
+           </Link>
+         ))}
+diff --git a/frontend/src/app/projects/[id]/page.tsx b/frontend/src/app/projects/[id]/page.tsx
+index 7e355d6..4b4c90f 100644
+--- a/frontend/src/app/projects/[id]/page.tsx
++++ b/frontend/src/app/projects/[id]/page.tsx
+@@ -6,17 +6,13 @@ import Link from 'next/link';
+ import { api, getToken, clearToken, ApiError, type ProjectDetail, type StageKey } from '@/lib/api';
+ import { StationRail } from '@/components/StationRail';
+ import { StageCard } from '@/components/StageCard';
+-
+-const STATUS_TEXT: Record<string, string> = {
+-  RUNNING: 'Berjalan',
+-  COMPLETED: 'Selesai',
+-  REJECTED: 'Ditolak',
+-  FAILED: 'Gagal',
+-};
++import { useI18n } from '@/lib/i18n/I18nProvider';
++import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+ 
+ export default function ProjectDetailPage() {
+   const params = useParams<{ id: string }>();
+   const router = useRouter();
++  const { t } = useI18n();
+   const [project, setProject] = useState<ProjectDetail | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [decidingKey, setDecidingKey] = useState<StageKey | null>(null);
+@@ -31,9 +27,9 @@ export default function ProjectDetailPage() {
+         router.push('/login');
+         return;
+       }
+-      setError(err instanceof ApiError ? err.message : 'Gagal memuat project.');
++      setError(err instanceof ApiError ? err.message : t('error.loadProjectFailed'));
+     }
+-  }, [params.id, router]);
++  }, [params.id, router, t]);
+ 
+   useEffect(() => {
+     if (!getToken()) {
+@@ -52,7 +48,7 @@ export default function ProjectDetailPage() {
+       await api.decideStage(params.id, stageKey, decision, comment);
+       await load();
+     } catch (err) {
+-      setError(err instanceof ApiError ? err.message : 'Gagal mengirim keputusan.');
++      setError(err instanceof ApiError ? err.message : t('error.decisionFailed'));
+     } finally {
+       setDecidingKey(null);
+     }
+@@ -61,7 +57,7 @@ export default function ProjectDetailPage() {
+   if (!project) {
+     return (
+       <main className="mx-auto max-w-5xl px-6 py-10">
+-        <p className="text-sm text-inkMuted">{error ?? 'Memuat…'}</p>
++        <p className="text-sm text-inkMuted">{error ?? t('projectDetail.loading')}</p>
+       </main>
+     );
+   }
+@@ -71,16 +67,20 @@ export default function ProjectDetailPage() {
+   return (
+     <main className="mx-auto max-w-5xl px-6 py-10">
+       <Link href="/" className="font-display text-xs text-inkMuted hover:text-ink">
+-        ← Semua project
++        {t('projectDetail.back')}
+       </Link>
+ 
++      <div className="mt-2 flex justify-end">
++        <LanguageSwitcher />
++      </div>
++
+       <div className="mt-4 flex items-start justify-between gap-4">
+         <div>
+           <h1 className="text-2xl font-semibold text-ink">{project.name}</h1>
+           <p className="mt-1 max-w-2xl text-sm text-inkMuted">{project.businessIdea}</p>
+         </div>
+         <span className="whitespace-nowrap rounded-full border border-panelBorder px-3 py-1 font-display text-[11px] text-inkMuted">
+-          {STATUS_TEXT[project.status]}
++          {t(`projectStatus.${project.status}`)}
+         </span>
+       </div>
+ 
+diff --git a/frontend/src/app/projects/new/page.tsx b/frontend/src/app/projects/new/page.tsx
+index 3f3548e..da70e2a 100644
+--- a/frontend/src/app/projects/new/page.tsx
++++ b/frontend/src/app/projects/new/page.tsx
+@@ -4,9 +4,11 @@ import { useState } from 'react';
+ import { useRouter } from 'next/navigation';
+ import Link from 'next/link';
+ import { api, ApiError } from '@/lib/api';
++import { useI18n } from '@/lib/i18n/I18nProvider';
+ 
+ export default function NewProjectPage() {
+   const router = useRouter();
++  const { t } = useI18n();
+   const [name, setName] = useState('');
+   const [businessIdea, setBusinessIdea] = useState('');
+   const [knowledgeBaseId, setKnowledgeBaseId] = useState('');
+@@ -27,7 +29,7 @@ export default function NewProjectPage() {
+       });
+       router.push(`/projects/${project.id}`);
+     } catch (err) {
+-      setError(err instanceof ApiError ? err.message : 'Gagal membuat project.');
++      setError(err instanceof ApiError ? err.message : t('error.createProjectFailed'));
+       setLoading(false);
+     }
+   }
+@@ -35,41 +37,39 @@ export default function NewProjectPage() {
+   return (
+     <main className="mx-auto max-w-2xl px-6 py-10">
+       <Link href="/" className="font-display text-xs text-inkMuted hover:text-ink">
+-        ← Kembali
++        {t('newProject.back')}
+       </Link>
+ 
+-      <h1 className="mt-4 text-2xl font-semibold text-ink">Project Baru</h1>
+-      <p className="mt-1 text-sm text-inkMuted">
+-        Idenya akan langsung dikirim ke pipeline n8n dan mulai digarap oleh Business Analyst Agent.
+-      </p>
++      <h1 className="mt-4 text-2xl font-semibold text-ink">{t('newProject.heading')}</h1>
++      <p className="mt-1 text-sm text-inkMuted">{t('newProject.subheading')}</p>
+ 
+       <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+         <div>
+-          <label className="mb-1 block text-sm text-inkMuted">Nama project</label>
++          <label className="mb-1 block text-sm text-inkMuted">{t('newProject.nameLabel')}</label>
+           <input
+             required
+             value={name}
+             onChange={(e) => setName(e.target.value)}
+-            placeholder="mis. Platform Toko Buku Online"
++            placeholder={t('newProject.namePlaceholder')}
+             className="w-full rounded-md border border-panelBorder bg-floor px-3 py-2 text-sm text-ink placeholder:text-inkMuted focus:border-track focus:outline-none"
+           />
+         </div>
+ 
+         <div>
+-          <label className="mb-1 block text-sm text-inkMuted">Business idea</label>
++          <label className="mb-1 block text-sm text-inkMuted">{t('newProject.ideaLabel')}</label>
+           <textarea
+             required
+             rows={5}
+             value={businessIdea}
+             onChange={(e) => setBusinessIdea(e.target.value)}
+-            placeholder="Jelaskan idenya selengkap mungkin — target pengguna, fitur utama, batasan..."
++            placeholder={t('newProject.ideaPlaceholder')}
+             className="w-full rounded-md border border-panelBorder bg-floor px-3 py-2 text-sm text-ink placeholder:text-inkMuted focus:border-track focus:outline-none"
+           />
+         </div>
+ 
+         <div className="grid grid-cols-2 gap-4">
+           <div>
+-            <label className="mb-1 block text-sm text-inkMuted">Knowledge base ID (opsional)</label>
++            <label className="mb-1 block text-sm text-inkMuted">{t('newProject.kbLabel')}</label>
+             <input
+               value={knowledgeBaseId}
+               onChange={(e) => setKnowledgeBaseId(e.target.value)}
+@@ -78,7 +78,7 @@ export default function NewProjectPage() {
+             />
+           </div>
+           <div>
+-            <label className="mb-1 block text-sm text-inkMuted">Model AI</label>
++            <label className="mb-1 block text-sm text-inkMuted">{t('newProject.modelLabel')}</label>
+             <select
+               value={aiModel}
+               onChange={(e) => setAiModel(e.target.value)}
+@@ -98,7 +98,7 @@ export default function NewProjectPage() {
+           disabled={loading}
+           className="w-full rounded-md bg-track px-4 py-2.5 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
+         >
+-          {loading ? 'Memulai pipeline…' : 'Mulai Pipeline'}
++          {loading ? t('newProject.submitLoading') : t('newProject.submitDefault')}
+         </button>
+       </form>
+     </main>
+diff --git a/frontend/src/components/LanguageSwitcher.tsx b/frontend/src/components/LanguageSwitcher.tsx
+new file mode 100644
+index 0000000..d7ff282
+--- /dev/null
++++ b/frontend/src/components/LanguageSwitcher.tsx
+@@ -0,0 +1,30 @@
++'use client';
++
++import { useI18n } from '@/lib/i18n/I18nProvider';
++
++const LANGS = [
++  { code: 'id', label: 'ID' },
++  { code: 'en', label: 'EN' },
++] as const;
++
++export function LanguageSwitcher() {
++  const { lang, setLang, t } = useI18n();
++
++  return (
++    <div className="flex items-center gap-1 rounded-full border border-panelBorder bg-panel p-0.5">
++      <span className="sr-only">{t('setting.language')}</span>
++      {LANGS.map(({ code, label }) => (
++        <button
++          key={code}
++          onClick={() => setLang(code)}
++          aria-pressed={lang === code}
++          className={`rounded-full px-2.5 py-1 font-display text-[11px] transition ${
++            lang === code ? 'bg-track text-floor' : 'text-inkMuted hover:text-ink'
++          }`}
++        >
++          {label}
++        </button>
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/StageCard.tsx b/frontend/src/components/StageCard.tsx
+index 5cf87d2..1d58586 100644
+--- a/frontend/src/components/StageCard.tsx
++++ b/frontend/src/components/StageCard.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useState } from 'react';
+ import type { ProjectStage } from '@/lib/api';
++import { useI18n } from '@/lib/i18n/I18nProvider';
+ 
+ const STATUS_BADGE: Record<string, string> = {
+   APPROVED: 'bg-go/15 text-go border-go/30',
+@@ -10,13 +11,6 @@ const STATUS_BADGE: Record<string, string> = {
+   PENDING: 'bg-panel text-inkMuted border-panelBorder',
+ };
+ 
+-const STATUS_TEXT: Record<string, string> = {
+-  APPROVED: 'Disetujui',
+-  GENERATED: 'Menunggu keputusan',
+-  REJECTED: 'Ditolak',
+-  PENDING: 'Belum sampai giliran',
+-};
+-
+ export function StageCard({
+   stage,
+   onDecide,
+@@ -26,9 +20,15 @@ export function StageCard({
+   onDecide: (decision: 'approved' | 'rejected', comment: string) => void;
+   deciding: boolean;
+ }) {
++  const { t } = useI18n();
+   const [expanded, setExpanded] = useState(stage.status === 'GENERATED');
+   const [comment, setComment] = useState('');
+ 
++  const badgeText =
++    stage.status === 'GENERATED' && stage.stageKey === 'QA'
++      ? t('projectDetail.qaGeneratedDone')
++      : t(`stageStatus.${stage.status}`);
++
+   return (
+     <div className="rounded-lg border border-panelBorder bg-panel">
+       <button
+@@ -42,7 +42,7 @@ export function StageCard({
+           )}
+         </div>
+         <span className={`rounded-full border px-3 py-1 font-display text-[11px] ${STATUS_BADGE[stage.status]}`}>
+-          {stage.status === 'GENERATED' && stage.stageKey === 'QA' ? 'Selesai digenerate' : STATUS_TEXT[stage.status]}
++          {badgeText}
+         </span>
+       </button>
+ 
+@@ -53,12 +53,12 @@ export function StageCard({
+               {stage.content}
+             </pre>
+           ) : (
+-            <p className="font-display text-xs text-inkMuted">Belum ada artifact untuk tahap ini.</p>
++            <p className="font-display text-xs text-inkMuted">{t('projectDetail.noArtifact')}</p>
+           )}
+ 
+           {stage.comment && (
+             <p className="mt-3 text-sm text-inkMuted">
+-              <span className="text-ink">Catatan:</span> {stage.comment}
++              <span className="text-ink">{t('projectDetail.noteLabel')}</span> {stage.comment}
+               {stage.decidedBy && <span className="text-inkMuted"> — {stage.decidedBy}</span>}
+             </p>
+           )}
+@@ -68,7 +68,7 @@ export function StageCard({
+               <textarea
+                 value={comment}
+                 onChange={(e) => setComment(e.target.value)}
+-                placeholder="Catatan (opsional) — alasan approve/reject"
++                placeholder={t('projectDetail.commentPlaceholder')}
+                 rows={2}
+                 className="w-full rounded-md border border-panelBorder bg-floor p-3 text-sm text-ink placeholder:text-inkMuted focus:border-track focus:outline-none"
+               />
+@@ -78,14 +78,14 @@ export function StageCard({
+                   onClick={() => onDecide('approved', comment)}
+                   className="rounded-md bg-go px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
+                 >
+-                  Setujui
++                  {t('button.approve')}
+                 </button>
+                 <button
+                   disabled={deciding}
+                   onClick={() => onDecide('rejected', comment)}
+                   className="rounded-md bg-stop px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
+                 >
+-                  Tolak
++                  {t('button.reject')}
+                 </button>
+               </div>
+             </div>
+@@ -93,7 +93,7 @@ export function StageCard({
+ 
+           {stage.status === 'GENERATED' && stage.stageKey === 'QA' && (
+             <p className="mt-4 font-display text-xs text-inkMuted">
+-              Tahap ini tidak memerlukan approval — workflow akan otomatis menyelesaikan project setelah QA selesai digenerate.
++              {t('projectDetail.qaNoApprovalNeeded')}
+             </p>
+           )}
+         </div>
+diff --git a/frontend/src/components/StationRail.tsx b/frontend/src/components/StationRail.tsx
+index f3a3a2d..808c20e 100644
+--- a/frontend/src/components/StationRail.tsx
++++ b/frontend/src/components/StationRail.tsx
+@@ -9,6 +9,12 @@ const STATUS_STYLES: Record<string, { node: string; label: string }> = {
+   PENDING: { node: 'border-panelBorder bg-panel text-inkMuted', label: 'text-inkMuted' },
+ };
+ 
++// Note: stage.label comes from the backend (STAGE_LABELS in
++// backend/src/common/stage-order.ts) and is a set of professional role
++// titles ("Business Analyst — PRD", "QA Engineer", etc.) — these are kept
++// language-agnostic by design, same as job titles wouldn't normally be
++// translated. If that's not the intended behavior, STAGE_LABELS would need
++// to move into the i18n dictionaries and be looked up by lang server-side.
+ export function StationRail({ stages, activeKey }: { stages: ProjectStage[]; activeKey?: string | null }) {
+   return (
+     <div className="w-full overflow-x-auto pb-2">
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index e4f4643..40343c6 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -51,7 +51,7 @@ export interface ProjectSummary {
+   name: string;
+   status: ProjectStatus;
+   currentStage: StageKey | null;
+-  currentStageLabel: string;
++  currentStageLabel: string | null; // BUGFIX: null (not 'Selesai') when the project is done
+   createdAt: string;
+   updatedAt: string;
+ }
+diff --git a/frontend/src/lib/i18n/I18nProvider.tsx b/frontend/src/lib/i18n/I18nProvider.tsx
+new file mode 100644
+index 0000000..956ddaf
+--- /dev/null
++++ b/frontend/src/lib/i18n/I18nProvider.tsx
+@@ -0,0 +1,130 @@
++'use client';
++
++import {
++  createContext,
++  useCallback,
++  useContext,
++  useEffect,
++  useMemo,
++  useState,
++} from 'react';
++
++export type Lang = 'id' | 'en';
++
++type Dictionary = Record<string, unknown>;
++
++const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
++const STORAGE_KEY = 'asf_lang';
++
++function getFromDictionary(dict: Dictionary, key: string): string | undefined {
++  const value = key.split('.').reduce<unknown>((node, segment) => {
++    if (node && typeof node === 'object') return (node as Record<string, unknown>)[segment];
++    return undefined;
++  }, dict);
++  return typeof value === 'string' ? value : undefined;
++}
++
++function interpolate(template: string, vars?: Record<string, string | number>): string {
++  if (!vars) return template;
++  return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(vars[name] ?? `{{${name}}}`));
++}
++
++interface I18nContextValue {
++  lang: Lang;
++  setLang: (lang: Lang) => void;
++  t: (key: string, vars?: Record<string, string | number>) => string;
++  ready: boolean;
++}
++
++const I18nContext = createContext<I18nContextValue | null>(null);
++
++/**
++ * BUGFIX (bahasa tidak konsisten): this provider is the piece that was
++ * entirely missing. The backend's GET /i18n/:lang has worked correctly
++ * since V1.1 — nothing in the frontend ever called it. This:
++ *   1. Reads the saved preference from localStorage (defaults to "id").
++ *   2. Fetches that dictionary from the backend on mount and on every
++ *      language change — this is the actual fix for "switched to English
++ *      but the page still shows Indonesian": before this, no fetch ever
++ *      happened, so there was no dictionary to switch to in the first place.
++ *   3. Applies the change immediately (no logout/reload), matching V1.1 §5.1.
++ *   4. Best-effort persists the choice to the backend (fire-and-forget —
++ *      never blocks the UI switch on network latency).
++ */
++export function I18nProvider({ children }: { children: React.ReactNode }) {
++  const [lang, setLangState] = useState<Lang>('id');
++  const [dictionary, setDictionary] = useState<Dictionary>({});
++  const [ready, setReady] = useState(false);
++
++  useEffect(() => {
++    const saved = (typeof window !== 'undefined' && localStorage.getItem(STORAGE_KEY)) as Lang | null;
++    if (saved === 'id' || saved === 'en') setLangState(saved);
++  }, []);
++
++  useEffect(() => {
++    let cancelled = false;
++    setReady(false);
++    fetch(`${API_URL}/i18n/${lang}`)
++      .then((res) => {
++        if (!res.ok) throw new Error(`i18n fetch failed: ${res.status}`);
++        return res.json();
++      })
++      .then((dict: Dictionary) => {
++        if (!cancelled) {
++          setDictionary(dict);
++          setReady(true);
++        }
++      })
++      .catch(() => {
++        // Network hiccup: keep whatever dictionary we already have rather
++        // than blanking the UI — worst case, text stays in the previous
++        // language until the next successful fetch.
++        if (!cancelled) setReady(true);
++      });
++
++    if (typeof document !== 'undefined') {
++      document.documentElement.lang = lang;
++    }
++
++    return () => {
++      cancelled = true;
++    };
++  }, [lang]);
++
++  const setLang = useCallback((next: Lang) => {
++    setLangState(next);
++    if (typeof window !== 'undefined') {
++      localStorage.setItem(STORAGE_KEY, next);
++      const token = localStorage.getItem('asf_token');
++      if (token) {
++        // Fire-and-forget persistence — see AuthController.updateLanguage.
++        fetch(`${API_URL}/auth/me/language`, {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
++          body: JSON.stringify({ lang: next }),
++        }).catch(() => {
++          /* non-fatal — local switch already applied */
++        });
++      }
++    }
++  }, []);
++
++  const t = useCallback(
++    (key: string, vars?: Record<string, string | number>) => {
++      const value = getFromDictionary(dictionary, key);
++      if (value === undefined) return key; // visible fallback beats a blank UI
++      return interpolate(value, vars);
++    },
++    [dictionary],
++  );
++
++  const value = useMemo(() => ({ lang, setLang, t, ready }), [lang, setLang, t, ready]);
++
++  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
++}
++
++export function useI18n() {
++  const ctx = useContext(I18nContext);
++  if (!ctx) throw new Error('useI18n must be used inside <I18nProvider>');
++  return ctx;
++}

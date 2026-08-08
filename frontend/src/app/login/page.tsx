@@ -1,10 +1,9 @@
 'use client';
-
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setToken, ApiError } from '@/lib/api';
-import { useI18n } from '@/lib/i18n';
-
+import { useI18n } from '@/lib/i18n/I18nProvider';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 export default function LoginPage() {
   const router = useRouter();
   const { t } = useI18n();
@@ -12,7 +11,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -22,25 +20,25 @@ export default function LoginPage() {
       setToken(accessToken);
       router.push('/');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Gagal masuk. Coba lagi.');
+      setError(err instanceof ApiError ? err.message : t('error.loginFailed'));
     } finally {
       setLoading(false);
     }
   }
-
   function handleGoogleLogin() {
     window.location.href = api.googleLoginUrl();
   }
-
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-panelBorder bg-panel p-8">
         <p className="font-display text-xs uppercase tracking-widest text-track">AI Software Factory</p>
-        <h1 className="mt-2 text-xl font-semibold text-ink">Masuk ke ruang kendali</h1>
-
+        <h1 className="mt-2 text-xl font-semibold text-ink">{t('login.heading')}</h1>
         <div className="mt-6 space-y-4">
           <div>
-            <label className="mb-1 block text-sm text-inkMuted">Email</label>
+            <label className="mb-1 block text-sm text-inkMuted">{t('login.email')}</label>
             <input
               type="email"
               required
@@ -50,7 +48,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-inkMuted">Password</label>
+            <label className="mb-1 block text-sm text-inkMuted">{t('login.password')}</label>
             <input
               type="password"
               required
@@ -60,20 +58,20 @@ export default function LoginPage() {
             />
           </div>
         </div>
-
         {error && <p className="mt-4 text-sm text-stop">{error}</p>}
-
         <button
           type="submit"
           disabled={loading}
           className="mt-6 w-full rounded-md bg-track px-4 py-2 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
         >
-          {loading ? 'Memproses…' : 'Masuk'}
+          {loading ? t('login.submitLoading') : t('login.submitDefault')}
         </button>
 
         <div className="mt-5 flex items-center gap-3">
           <div className="h-px flex-1 bg-panelBorder" />
-          <span className="font-display text-[11px] uppercase tracking-widest text-inkMuted">atau</span>
+          <span className="font-display text-[11px] uppercase tracking-widest text-inkMuted">
+            {t('login.or')}
+          </span>
           <div className="h-px flex-1 bg-panelBorder" />
         </div>
 
@@ -100,7 +98,7 @@ export default function LoginPage() {
               d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.5 5.5c-.5.4 6.9-5 6.9-15.2 0-1.2-.1-2.4-.3-3.5z"
             />
           </svg>
-          Login dengan Google
+          {t('login.google')}
         </button>
       </form>
     </main>

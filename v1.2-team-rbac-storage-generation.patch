@@ -1,0 +1,2324 @@
+From 4a4b7ac87e7ab96d2accb886115bc82e11c4c94e Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Fri, 7 Aug 2026 18:46:10 +0000
+Subject: [PATCH] feat(v1.2): Team/RBAC, S3-compatible storage, reliable
+ file-by-file generation engine
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Prisma schema: Organization/Team/OrganizationMember/TeamMember, StageAssignment,
+  RevisionRequest, ArtifactObject, ReminderLog. All additive — existing 3 models
+  (User/Project/ArtifactStage) extended with nullable FKs, no breaking changes.
+- RBAC: RolesGuard + Roles decorator, org-level enforcement; stage-level assignment
+  permission enforced in StagesService.decide() (needs stageKey context).
+- Teams + Members modules (FR-601-606). MailService is a log-only STUB — this repo
+  has zero SMTP integration, flagged explicitly.
+- AuthService: auto-provisions an Organization+OWNER membership for the existing
+  single-admin account and for new Google sign-ups, so V1.2 doesn't require manual
+  setup on top of the existing single-admin flow. /auth/me now returns organizationId.
+- Stages: 3-way decision (approved/rejected/revision_requested), stage assignment,
+  stage + project deadlines, revision history endpoint.
+- Storage module: S3-compatible client (MinIO by default). Folder structure is
+  users/{userId}/projects/{projectId}/artifacts/... per bug report — NOT
+  organizations/.../stages/... Added because this repo had NO object storage at
+  all before this (content was stored as plain text in Postgres).
+- Generation/Validation engine: sandboxed Docker validators for backend (tsc),
+  frontend (tsc+build), database (ephemeral Postgres + migration), self-healing
+  counter (max 3, tracked on ArtifactStage). New webhook endpoints upload-file and
+  validate-stage for n8n's file-by-file generation loop to call.
+- docker-compose.yml: added MinIO service + docker socket mount on backend
+  (sandbox validation needs to spawn containers).
+
+NOT included in this patch: n8n workflow changes (file-by-file generation prompts,
+3-way Check Approval switches) — those are separate n8n-side changes, not backend
+code. Reference patterns already validated and deployed as standalone n8n workflows
+in a prior session; applying them to this repo's actual production workflow needs
+explicit confirmation before touching a live n8n instance.
+
+Prisma migration NOT generated/run in this patch — sandbox has no network access
+to binaries.prisma.sh (blocked) and no DATABASE_URL to a real Postgres. Run
+'npx prisma migrate dev --name v1_2_governance' after applying.
+---
+ backend/.env.example                          |  20 ++
+ backend/package.json                          |   4 +-
+ backend/prisma/schema.prisma                  | 236 +++++++++++++++++-
+ backend/src/app.module.ts                     |   4 +
+ backend/src/auth/auth.controller.ts           |   5 +-
+ backend/src/auth/auth.service.ts              |  56 ++++-
+ .../rbac/membership-resolver.service.ts       |  30 +++
+ backend/src/common/rbac/rbac.module.ts        |   9 +
+ backend/src/common/rbac/roles.decorator.ts    |  14 ++
+ backend/src/common/rbac/roles.guard.ts        |  52 ++++
+ backend/src/generation/docker-exec.util.ts    |  56 +++++
+ backend/src/generation/generation.module.ts   |  20 ++
+ backend/src/generation/sandbox.service.ts     |  46 ++++
+ backend/src/generation/types.ts               |  11 +
+ backend/src/generation/validation.service.ts  |  89 +++++++
+ .../validators/backend-validator.service.ts   |  31 +++
+ .../validators/database-validator.service.ts  |  75 ++++++
+ .../validators/frontend-validator.service.ts  |  42 ++++
+ .../organizations/members/dto/member.dto.ts   |  20 ++
+ .../src/organizations/members/mail.service.ts |  24 ++
+ .../members/members.controller.ts             |  50 ++++
+ .../organizations/members/members.module.ts   |  13 +
+ .../organizations/members/members.service.ts  |  94 +++++++
+ .../src/organizations/teams/dto/team.dto.ts   |  23 ++
+ .../organizations/teams/teams.controller.ts   |  44 ++++
+ .../src/organizations/teams/teams.module.ts   |  11 +
+ .../src/organizations/teams/teams.service.ts  |  48 ++++
+ backend/src/projects/dto/set-deadline.dto.ts  |   6 +
+ backend/src/projects/projects.controller.ts   |  23 +-
+ backend/src/projects/projects.module.ts       |   2 +
+ backend/src/projects/projects.service.ts      |  23 +-
+ backend/src/stages/dto/decide-stage.dto.ts    |  16 +-
+ backend/src/stages/stages.controller.ts       |  76 +++++-
+ backend/src/stages/stages.module.ts           |   3 +
+ backend/src/stages/stages.service.ts          | 130 ++++++++--
+ backend/src/storage/storage.module.ts         |   8 +
+ backend/src/storage/storage.service.ts        | 101 ++++++++
+ backend/src/webhooks/dto/upload-file.dto.ts   |  23 ++
+ .../src/webhooks/dto/validate-stage.dto.ts    |  12 +
+ backend/src/webhooks/webhooks.controller.ts   |  16 ++
+ backend/src/webhooks/webhooks.module.ts       |   3 +
+ backend/src/webhooks/webhooks.service.ts      |  50 +++-
+ docker-compose.yml                            |  31 +++
+ 43 files changed, 1607 insertions(+), 43 deletions(-)
+ create mode 100644 backend/src/common/rbac/membership-resolver.service.ts
+ create mode 100644 backend/src/common/rbac/rbac.module.ts
+ create mode 100644 backend/src/common/rbac/roles.decorator.ts
+ create mode 100644 backend/src/common/rbac/roles.guard.ts
+ create mode 100644 backend/src/generation/docker-exec.util.ts
+ create mode 100644 backend/src/generation/generation.module.ts
+ create mode 100644 backend/src/generation/sandbox.service.ts
+ create mode 100644 backend/src/generation/types.ts
+ create mode 100644 backend/src/generation/validation.service.ts
+ create mode 100644 backend/src/generation/validators/backend-validator.service.ts
+ create mode 100644 backend/src/generation/validators/database-validator.service.ts
+ create mode 100644 backend/src/generation/validators/frontend-validator.service.ts
+ create mode 100644 backend/src/organizations/members/dto/member.dto.ts
+ create mode 100644 backend/src/organizations/members/mail.service.ts
+ create mode 100644 backend/src/organizations/members/members.controller.ts
+ create mode 100644 backend/src/organizations/members/members.module.ts
+ create mode 100644 backend/src/organizations/members/members.service.ts
+ create mode 100644 backend/src/organizations/teams/dto/team.dto.ts
+ create mode 100644 backend/src/organizations/teams/teams.controller.ts
+ create mode 100644 backend/src/organizations/teams/teams.module.ts
+ create mode 100644 backend/src/organizations/teams/teams.service.ts
+ create mode 100644 backend/src/projects/dto/set-deadline.dto.ts
+ create mode 100644 backend/src/storage/storage.module.ts
+ create mode 100644 backend/src/storage/storage.service.ts
+ create mode 100644 backend/src/webhooks/dto/upload-file.dto.ts
+ create mode 100644 backend/src/webhooks/dto/validate-stage.dto.ts
+
+diff --git a/backend/.env.example b/backend/.env.example
+index cd4d111..8c9ddd4 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -31,3 +31,23 @@ FRONTEND_ORIGIN="https://aisf.nanjarbudiman.com"
+ 
+ # i18n default (Section 4.2 PRD V1.1)
+ DEFAULT_LANGUAGE="id"
++
++# ===== V1.2 =====
++
++# S3-Compatible Storage (§10 PRD V1.2). Default MinIO service is added in
++# docker-compose.yml — point STORAGE_ENDPOINT there for local/self-hosted,
++# or at a real S3/R2/Wasabi endpoint in production.
++STORAGE_PROVIDER="minio"
++STORAGE_ENDPOINT="http://minio:9000"
++STORAGE_REGION="us-east-1"
++STORAGE_BUCKET="asf"
++STORAGE_ACCESS_KEY="change-me"
++STORAGE_SECRET_KEY="change-me"
++# CATATAN: docker-compose.yml juga baca STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY
++# dari .env di ROOT repo (bukan file ini) untuk konfigurasi kredensial root
++# container MinIO — samakan isinya di kedua tempat.
++
++# Sandbox validation (§11.3 PRD V1.2) — container backend butuh akses ke
++# docker socket untuk menjalankan container sekali-pakai (npm/tsc/build/psql).
++# Sudah di-wire lewat volume mount di docker-compose.yml, tidak perlu env var
++# tambahan — pastikan saja docker.sock host bisa diakses.
+diff --git a/backend/package.json b/backend/package.json
+index 7bcd90e..fcfd9c4 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "ai-software-factory-backend",
+-  "version": "1.1.0",
++  "version": "1.2.0",
+   "private": true,
+   "scripts": {
+     "build": "nest build",
+@@ -19,6 +19,8 @@
+     "@nestjs/passport": "^10.0.3",
+     "@nestjs/platform-express": "^10.4.0",
+     "@nestjs/throttler": "^6.2.1",
++    "@aws-sdk/client-s3": "^3.600.0",
++    "@aws-sdk/s3-request-presigner": "^3.600.0",
+     "@prisma/client": "^5.20.0",
+     "archiver": "^7.0.1",
+     "axios": "^1.7.7",
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 1fe1d7f..7feaeba 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -14,11 +14,22 @@ enum ProjectStatus {
+   FAILED
+ }
+ 
++// V1.2: additive only — GENERATED keeps its existing meaning ("ready for a
++// human decision") so StagesService.decide()'s existing gate on GENERATED
++// doesn't need to change. New states slot in around it for the reliable
++// generation pipeline (§11 PRD V1.2) and the revision workflow (§9).
+ enum StageStatus {
+   PENDING
++  GENERATING        // NEW — file/section-by-file generation in progress
++  VALIDATING        // NEW — running sandboxed validation
++  SELF_HEALING      // NEW — automatic retry after a failed validation
+   GENERATED
++  REVISION_REQUESTED // NEW — sent back for changes, not archived
+   APPROVED
+   REJECTED
++  ARCHIVED           // NEW — terminal state after REJECTED, distinct so
++                      // REJECTED can stay meaningful as "the decision", while
++                      // ARCHIVED means "and now closed out"
+ }
+ 
+ enum StageKey {
+@@ -38,6 +49,32 @@ enum AuthProvider {
+   GOOGLE
+ }
+ 
++// V1.2: role level organisasi (§7 PRD V1.2)
++enum OrgRole {
++  OWNER
++  ADMIN
++  MEMBER
++  VIEWER
++}
++
++enum MemberStatus {
++  INVITED
++  ACTIVE
++  DEACTIVATED
++}
++
++enum ValidationStatus {
++  PENDING
++  PASSED
++  FAILED
++}
++
++enum ReminderType {
++  T_MINUS_24H
++  T_MINUS_3H
++  OVERDUE
++}
++
+ model User {
+   id           String       @id @default(uuid())
+   email        String       @unique
+@@ -48,16 +85,95 @@ model User {
+   // V1.1: id akun Google, unik jika terisi
+   googleId     String?      @unique @map("google_id")
+   authProvider AuthProvider @default(LOCAL) @map("auth_provider")
+-  // BUGFIX (bahasa tidak konsisten): kolom ini sebelumnya tidak pernah dibuat meski
+-  // sudah disebut di Dokumentasi V1.1 §5.1 ("tersimpan di JWT/preferensi user").
+-  // Frontend TIDAK bergantung pada kolom ini untuk switching langsung (itu localStorage,
+-  // lihat frontend/src/lib/i18n) — ini hanya untuk preferensi lintas-device/re-login.
++  // BUGFIX bahasa V1.1: kolom ini sebelumnya tidak pernah dibuat meski sudah
++  // disebut di Dokumentasi V1.1 §5.1. Switching langsung di UI TIDAK
++  // bergantung pada kolom ini (itu localStorage, lihat frontend/src/lib/i18n)
++  // — ini hanya untuk preferensi lintas-device/re-login.
+   preferredLanguage String  @default("id") @map("preferred_language")
+   createdAt    DateTime     @default(now()) @map("created_at")
+ 
++  // V1.2
++  ownedOrganizations  Organization[]        @relation("OrgOwner")
++  memberships         OrganizationMember[]
++  createdProjects     Project[]             @relation("ProjectCreatedBy")
++  decidedStages       ArtifactStage[]       @relation("StageDecidedBy")
++
+   @@map("users")
+ }
+ 
++// ---------------------------------------------------------------
++// V1.2 — Organization, Team, Membership (§6 PRD V1.2)
++// ---------------------------------------------------------------
++
++model Organization {
++  id        String   @id @default(uuid())
++  name      String
++  ownerId   String   @map("owner_id")
++  owner     User     @relation("OrgOwner", fields: [ownerId], references: [id])
++  createdAt DateTime @default(now()) @map("created_at")
++  updatedAt DateTime @updatedAt @map("updated_at")
++
++  teams    Team[]
++  members  OrganizationMember[]
++  projects Project[]
++
++  @@map("organizations")
++}
++
++model Team {
++  id             String   @id @default(uuid())
++  organizationId String   @map("organization_id")
++  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
++  name           String
++  description    String?
++  createdAt      DateTime @default(now()) @map("created_at")
++
++  members TeamMember[]
++
++  @@index([organizationId])
++  @@map("teams")
++}
++
++model OrganizationMember {
++  id             String       @id @default(uuid())
++  organizationId String       @map("organization_id")
++  userId         String       @map("user_id")
++  role           OrgRole      @default(MEMBER)
++  status         MemberStatus @default(INVITED)
++  invitedBy      String?      @map("invited_by")
++  invitedAt      DateTime     @default(now()) @map("invited_at")
++  joinedAt       DateTime?    @map("joined_at")
++
++  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
++  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  teamMemberships  TeamMember[]
++  stageAssignments StageAssignment[]
++
++  @@unique([organizationId, userId])
++  @@index([organizationId])
++  @@map("organization_members")
++}
++
++model TeamMember {
++  id                   String   @id @default(uuid())
++  teamId               String   @map("team_id")
++  organizationMemberId String   @map("organization_member_id")
++  jobTitle             String?  @map("job_title") // mis. "Backend Lead", "QA Lead"
++  createdAt            DateTime @default(now()) @map("created_at")
++
++  team   Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
++  member OrganizationMember @relation(fields: [organizationMemberId], references: [id], onDelete: Cascade)
++
++  @@unique([teamId, organizationMemberId])
++  @@index([teamId])
++  @@map("team_members")
++}
++
++// ---------------------------------------------------------------
++// Project & Pipeline (existing model, extended for V1.2)
++// ---------------------------------------------------------------
++
+ model Project {
+   id              String        @id @default(uuid())
+   name            String
+@@ -69,8 +185,20 @@ model Project {
+   createdAt       DateTime      @default(now()) @map("created_at")
+   updatedAt       DateTime      @updatedAt @map("updated_at")
+ 
+-  stages ArtifactStage[]
++  // V1.2 — nullable for now to avoid breaking any existing project rows;
++  // see migration note in README-v1.2-patch.md before enforcing NOT NULL.
++  organizationId String?       @map("organization_id")
++  organization   Organization? @relation(fields: [organizationId], references: [id])
++  createdById    String?       @map("created_by_id")
++  createdBy      User?         @relation("ProjectCreatedBy", fields: [createdById], references: [id])
++  // S3 folder root is users/{createdById}/projects/{id}/... — see StorageService.
++  deadlineAt     DateTime?     @map("deadline_at")
++
++  stages           ArtifactStage[]
++  stageAssignments StageAssignment[]
+ 
++  @@index([organizationId])
++  @@index([createdById])
+   @@map("projects")
+ }
+ 
+@@ -80,17 +208,113 @@ model ArtifactStage {
+   project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+   stageKey     StageKey    @map("stage_key")
+   artifactName String?     @map("artifact_name")
++  // DEPRECATED as the primary payload once ArtifactObject/S3 is wired up
++  // (this batch adds the column below but the storage module itself is a
++  // follow-up patch) — kept NOT removed so existing rows stay readable.
+   content      String?
+   status       StageStatus @default(PENDING)
+   resumeUrl    String?     @map("resume_url")
+   comment      String?
+-  decidedBy    String?     @map("decided_by")
++  decidedBy    String?     @map("decided_by") // legacy: free-text email, kept for backward compat
++  decidedById  String?     @map("decided_by_id") // V1.2: proper FK once caller passes a userId
++  decidedByUser User?      @relation("StageDecidedBy", fields: [decidedById], references: [id])
+   generatedAt  DateTime?   @map("generated_at")
+   decidedAt    DateTime?   @map("decided_at")
+   createdAt    DateTime    @default(now()) @map("created_at")
+   updatedAt    DateTime    @updatedAt @map("updated_at")
+ 
++  // V1.2 — governance (§7, §8 PRD V1.2)
++  deadlineAt            DateTime? @map("deadline_at")
++  overdueAt             DateTime? @map("overdue_at")
++  revisionCount         Int       @default(0) @map("revision_count")
++  // V1.2 — reliable generation (§11 PRD V1.2)
++  validationStatus      ValidationStatus @default(PENDING) @map("validation_status")
++  selfHealingAttempts   Int              @default(0) @map("self_healing_attempts")
++  failedValidation      Boolean          @default(false) @map("failed_validation")
++
++  revisions RevisionRequest[]
++  artifacts ArtifactObject[]
++  reminders ReminderLog[]
++
+   @@unique([projectId, stageKey])
+   @@index([projectId])
+   @@map("artifact_stages")
+ }
++
++// ---------------------------------------------------------------
++// V1.2 — Stage Assignment & Revision (§7, §9 PRD V1.2)
++// ---------------------------------------------------------------
++
++model StageAssignment {
++  id               String   @id @default(uuid())
++  projectId        String   @map("project_id")
++  stageKey         StageKey @map("stage_key")
++  assignedMemberId String   @map("assigned_member_id")
++  assignedBy       String   @map("assigned_by")
++  assignedAt       DateTime @default(now()) @map("assigned_at")
++
++  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
++  assignedMember OrganizationMember @relation(fields: [assignedMemberId], references: [id])
++
++  @@unique([projectId, stageKey])
++  @@index([assignedMemberId])
++  @@map("stage_assignments")
++}
++
++model RevisionRequest {
++  id              String    @id @default(uuid())
++  artifactStageId String    @map("artifact_stage_id")
++  comment         String
++  requestedBy     String    @map("requested_by")
++  requestedAt     DateTime  @default(now()) @map("requested_at")
++  revisionNumber  Int       @map("revision_number")
++  resolvedAt      DateTime? @map("resolved_at")
++
++  artifactStage ArtifactStage @relation(fields: [artifactStageId], references: [id], onDelete: Cascade)
++
++  @@index([artifactStageId])
++  @@map("revision_requests")
++}
++
++// ---------------------------------------------------------------
++// V1.2 — Object Storage Metadata (§10 PRD V1.2)
++// Storage module itself (S3 client) is a separate follow-up patch — this
++// table exists now so ArtifactStage relations are already in place.
++// ---------------------------------------------------------------
++
++model ArtifactObject {
++  id              String   @id @default(uuid())
++  artifactStageId String   @map("artifact_stage_id")
++  fileName        String   @map("file_name") // e.g. "src/main.ts" or "PRD.md"
++  storageProvider String   @map("storage_provider") // "minio" | "s3" | "r2" | "wasabi"
++  bucket          String
++  objectKey       String   @map("object_key")
++  size            Int
++  mimeType        String   @map("mime_type")
++  checksum        String   // sha256 hex
++  version         Int      @default(1)
++  createdAt       DateTime @default(now()) @map("created_at")
++
++  artifactStage ArtifactStage @relation(fields: [artifactStageId], references: [id], onDelete: Cascade)
++
++  @@index([artifactStageId])
++  @@index([artifactStageId, fileName, version])
++  @@map("artifact_objects")
++}
++
++// ---------------------------------------------------------------
++// V1.2 — Deadline Reminder (§5 PRD V1.2)
++// ---------------------------------------------------------------
++
++model ReminderLog {
++  id              String       @id @default(uuid())
++  artifactStageId String       @map("artifact_stage_id")
++  reminderType    ReminderType @map("reminder_type")
++  sentTo          String       @map("sent_to")
++  sentAt          DateTime     @default(now()) @map("sent_at")
++
++  artifactStage ArtifactStage @relation(fields: [artifactStageId], references: [id], onDelete: Cascade)
++
++  @@unique([artifactStageId, reminderType])
++  @@map("reminder_logs")
++}
+diff --git a/backend/src/app.module.ts b/backend/src/app.module.ts
+index e8c830e..4305072 100644
+--- a/backend/src/app.module.ts
++++ b/backend/src/app.module.ts
+@@ -8,6 +8,8 @@ import { ProjectsModule } from './projects/projects.module';
+ import { StagesModule } from './stages/stages.module';
+ import { WebhooksModule } from './webhooks/webhooks.module';
+ import { I18nModule } from './i18n/i18n.module';
++import { TeamsModule } from './organizations/teams/teams.module';
++import { MembersModule } from './organizations/members/members.module';
+ 
+ @Module({
+   imports: [
+@@ -19,6 +21,8 @@ import { I18nModule } from './i18n/i18n.module';
+     StagesModule,
+     WebhooksModule,
+     I18nModule,
++    TeamsModule, // V1.2
++    MembersModule, // V1.2
+   ],
+   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+ })
+diff --git a/backend/src/auth/auth.controller.ts b/backend/src/auth/auth.controller.ts
+index 82d08dc..f227e9b 100644
+--- a/backend/src/auth/auth.controller.ts
++++ b/backend/src/auth/auth.controller.ts
+@@ -36,7 +36,10 @@ export class AuthController {
+   @UseGuards(JwtAuthGuard)
+   @HttpCode(HttpStatus.OK)
+   me(@Req() req: Request & { user: { userId: string; email: string } }) {
+-    return req.user;
++    // V1.2: include the caller's primary organization so the frontend
++    // doesn't need a separate lookup / placeholder route to know which
++    // organization to scope Team/Member/Project screens to.
++    return this.authService.getMeWithOrganization(req.user.userId);
+   }
+ 
+   // BUGFIX (bahasa tidak konsisten): endpoint baru — sebelumnya tidak ada
+diff --git a/backend/src/auth/auth.service.ts b/backend/src/auth/auth.service.ts
+index 759b513..9bdb60a 100644
+--- a/backend/src/auth/auth.service.ts
++++ b/backend/src/auth/auth.service.ts
+@@ -16,17 +16,41 @@ export class AuthService implements OnModuleInit {
+   /**
+    * Single-admin app: seed the one operator account from env on boot if it
+    * doesn't exist yet. Simpler than a signup flow for an internal tool.
++   *
++   * V1.2: also ensures that account owns an Organization — introducing
++   * Team/RBAC (§6-7 PRD V1.2) shouldn't require a manual setup step for
++   * the existing single-admin deployment. Runs on every boot and is a
++   * no-op once the org exists, so it's safe for already-deployed installs
++   * too (their admin user exists but never had an Organization).
+    */
+   async onModuleInit() {
+     const email = this.config.get<string>('ADMIN_EMAIL');
+     const password = this.config.get<string>('ADMIN_PASSWORD');
+     if (!email || !password) return;
+ 
+-    const existing = await this.prisma.user.findUnique({ where: { email } });
+-    if (existing) return;
++    let admin = await this.prisma.user.findUnique({ where: { email } });
++    if (!admin) {
++      const passwordHash = await bcrypt.hash(password, 12);
++      admin = await this.prisma.user.create({ data: { email, passwordHash } });
++    }
++
++    await this.ensureOwnerOrganization(admin.id, email);
++  }
++
++  /** V1.2 — auto-provision an Organization + OWNER membership for a user who doesn't have one yet. */
++  private async ensureOwnerOrganization(userId: string, email: string) {
++    const existing = await this.prisma.organization.findFirst({ where: { ownerId: userId } });
++    if (existing) return existing;
+ 
+-    const passwordHash = await bcrypt.hash(password, 12);
+-    await this.prisma.user.create({ data: { email, passwordHash } });
++    return this.prisma.organization.create({
++      data: {
++        name: `${email.split('@')[0]}'s Organization`,
++        ownerId: userId,
++        members: {
++          create: { userId, role: 'OWNER', status: 'ACTIVE', joinedAt: new Date() },
++        },
++      },
++    });
+   }
+ 
+   async validateUser(email: string, password: string) {
+@@ -74,8 +98,10 @@ export class AuthService implements OnModuleInit {
+       });
+     }
+ 
+-    // 3) Belum ada sama sekali -> auto create account (PRD V1.1 4.1).
+-    return this.prisma.user.create({
++    // 3) Belum ada sama sekali -> auto create account (PRD V1.1 4.1) +
++    // auto create Organization (PRD V1.1 4.1 "opsional" — V1.2 makes it
++    // mandatory so the account always has somewhere to create projects).
++    const created = await this.prisma.user.create({
+       data: {
+         email: profile.email,
+         name: profile.name,
+@@ -84,6 +110,8 @@ export class AuthService implements OnModuleInit {
+         passwordHash: null,
+       },
+     });
++    await this.ensureOwnerOrganization(created.id, created.email);
++    return created;
+   }
+ 
+   /**
+@@ -100,4 +128,20 @@ export class AuthService implements OnModuleInit {
+       select: { id: true, preferredLanguage: true },
+     });
+   }
++
++  /** V1.2: /auth/me now also returns the caller's primary (owned or first-joined) organization. */
++  async getMeWithOrganization(userId: string) {
++    const user = await this.prisma.user.findUniqueOrThrow({
++      where: { id: userId },
++      select: { id: true, email: true, name: true, preferredLanguage: true },
++    });
++
++    const membership = await this.prisma.organizationMember.findFirst({
++      where: { userId, status: 'ACTIVE' },
++      orderBy: { invitedAt: 'asc' }, // oldest membership = the auto-provisioned owner org, most of the time
++      select: { organizationId: true, role: true },
++    });
++
++    return { ...user, organizationId: membership?.organizationId ?? null, role: membership?.role ?? null };
++  }
+ }
+diff --git a/backend/src/common/rbac/membership-resolver.service.ts b/backend/src/common/rbac/membership-resolver.service.ts
+new file mode 100644
+index 0000000..a80c87b
+--- /dev/null
++++ b/backend/src/common/rbac/membership-resolver.service.ts
+@@ -0,0 +1,30 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { PrismaService } from '../../prisma/prisma.service';
++import { MemberStatus } from '@prisma/client';
++
++@Injectable()
++export class MembershipResolverService {
++  constructor(private readonly prisma: PrismaService) {}
++
++  /** 404 (bukan 403) kalau user bukan anggota aktif — supaya tidak bocorkan keberadaan organisasi. */
++  async resolveByOrganization(userId: string, organizationId: string) {
++    const member = await this.prisma.organizationMember.findUnique({
++      where: { organizationId_userId: { organizationId, userId } },
++    });
++    if (!member || member.status !== MemberStatus.ACTIVE) {
++      throw new NotFoundException('Organization tidak ditemukan');
++    }
++    return member;
++  }
++
++  async resolveByProject(userId: string, projectId: string) {
++    const project = await this.prisma.project.findUnique({
++      where: { id: projectId },
++      select: { organizationId: true },
++    });
++    if (!project?.organizationId) {
++      throw new NotFoundException('Project tidak ditemukan');
++    }
++    return this.resolveByOrganization(userId, project.organizationId);
++  }
++}
+diff --git a/backend/src/common/rbac/rbac.module.ts b/backend/src/common/rbac/rbac.module.ts
+new file mode 100644
+index 0000000..3cebda7
+--- /dev/null
++++ b/backend/src/common/rbac/rbac.module.ts
+@@ -0,0 +1,9 @@
++import { Module } from '@nestjs/common';
++import { MembershipResolverService } from './membership-resolver.service';
++import { RolesGuard } from './roles.guard';
++
++@Module({
++  providers: [MembershipResolverService, RolesGuard],
++  exports: [MembershipResolverService, RolesGuard],
++})
++export class RbacModule {}
+diff --git a/backend/src/common/rbac/roles.decorator.ts b/backend/src/common/rbac/roles.decorator.ts
+new file mode 100644
+index 0000000..242f476
+--- /dev/null
++++ b/backend/src/common/rbac/roles.decorator.ts
+@@ -0,0 +1,14 @@
++import { SetMetadata } from '@nestjs/common';
++import { OrgRole } from '@prisma/client';
++
++export const ROLES_KEY = 'roles';
++
++/**
++ * Menandai endpoint sebagai butuh salah satu role organisasi ini. Dipakai
++ * bersama RolesGuard. §7 PRD V1.2.
++ *
++ * Permission approval per-stage (MEMBER hanya boleh approve jika di-assign)
++ * TIDAK dicek di sini — itu logic bisnis di StagesService.decide(), karena
++ * butuh konteks stageKey/project yang tidak tersedia di level route.
++ */
++export const Roles = (...roles: OrgRole[]) => SetMetadata(ROLES_KEY, roles);
+diff --git a/backend/src/common/rbac/roles.guard.ts b/backend/src/common/rbac/roles.guard.ts
+new file mode 100644
+index 0000000..5b636cc
+--- /dev/null
++++ b/backend/src/common/rbac/roles.guard.ts
+@@ -0,0 +1,52 @@
++import {
++  CanActivate,
++  ExecutionContext,
++  ForbiddenException,
++  Injectable,
++} from '@nestjs/common';
++import { Reflector } from '@nestjs/core';
++import { OrgRole } from '@prisma/client';
++import { ROLES_KEY } from './roles.decorator';
++import { MembershipResolverService } from './membership-resolver.service';
++
++/**
++ * RBAC level organisasi (§7 PRD V1.2). Jalan SETELAH JwtAuthGuard — pakai
++ * bersama: @UseGuards(JwtAuthGuard, RolesGuard).
++ *
++ * Meng-resolve OrganizationMember dari :organizationId ATAU :projectId di
++ * route, lalu menempelkannya ke req.member supaya controller/service bisa
++ * pakai tanpa query ulang.
++ */
++@Injectable()
++export class RolesGuard implements CanActivate {
++  constructor(
++    private readonly reflector: Reflector,
++    private readonly membership: MembershipResolverService,
++  ) {}
++
++  async canActivate(context: ExecutionContext): Promise<boolean> {
++    const requiredRoles = this.reflector.getAllAndOverride<OrgRole[]>(ROLES_KEY, [
++      context.getHandler(),
++      context.getClass(),
++    ]);
++
++    const req = context.switchToHttp().getRequest();
++    const userId: string = req.user?.userId;
++    const organizationId = req.params.organizationId;
++    const projectId = req.params.projectId ?? req.params.id;
++
++    const member = organizationId
++      ? await this.membership.resolveByOrganization(userId, organizationId)
++      : await this.membership.resolveByProject(userId, projectId);
++
++    req.member = member;
++
++    if (!requiredRoles || requiredRoles.length === 0) return true;
++
++    if (!requiredRoles.includes(member.role)) {
++      throw new ForbiddenException(`Butuh salah satu role: ${requiredRoles.join(', ')}`);
++    }
++
++    return true;
++  }
++}
+diff --git a/backend/src/generation/docker-exec.util.ts b/backend/src/generation/docker-exec.util.ts
+new file mode 100644
+index 0000000..0e2e434
+--- /dev/null
++++ b/backend/src/generation/docker-exec.util.ts
+@@ -0,0 +1,56 @@
++import { spawn } from 'child_process';
++
++export interface DockerRunOptions {
++  image: string;
++  workdir: string;
++  command: string[];
++  timeoutMs?: number;
++  network?: 'none' | 'bridge';
++}
++
++export interface DockerRunResult {
++  exitCode: number;
++  stdout: string;
++  stderr: string;
++  timedOut: boolean;
++}
++
++/**
++ * Jalankan satu command validasi di container Docker sekali pakai, mount
++ * read-write ke direktori hasil SandboxService.materialize(). Default
++ * `--network none` supaya file hasil generate tidak bisa exfiltrate apapun
++ * lewat postinstall script — `bridge` cuma dipakai untuk step yang benar-
++ * benar butuh akses registry (npm install).
++ */
++export function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult> {
++  const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
++
++  return new Promise((resolve) => {
++    const args = [
++      'run', '--rm',
++      '--network', opts.network ?? 'none',
++      '-v', `${opts.workdir}:/workspace`,
++      '-w', '/workspace',
++      opts.image,
++      ...opts.command,
++    ];
++
++    const proc = spawn('docker', args);
++    let stdout = '';
++    let stderr = '';
++    let timedOut = false;
++
++    const timer = setTimeout(() => {
++      timedOut = true;
++      proc.kill('SIGKILL');
++    }, timeoutMs);
++
++    proc.stdout.on('data', (d) => (stdout += d.toString()));
++    proc.stderr.on('data', (d) => (stderr += d.toString()));
++
++    proc.on('close', (code) => {
++      clearTimeout(timer);
++      resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
++    });
++  });
++}
+diff --git a/backend/src/generation/generation.module.ts b/backend/src/generation/generation.module.ts
+new file mode 100644
+index 0000000..2a88aa6
+--- /dev/null
++++ b/backend/src/generation/generation.module.ts
+@@ -0,0 +1,20 @@
++import { Module } from '@nestjs/common';
++import { SandboxService } from './sandbox.service';
++import { ValidationService } from './validation.service';
++import { BackendValidatorService } from './validators/backend-validator.service';
++import { FrontendValidatorService } from './validators/frontend-validator.service';
++import { DatabaseValidatorService } from './validators/database-validator.service';
++import { StorageModule } from '../storage/storage.module';
++
++@Module({
++  imports: [StorageModule],
++  providers: [
++    SandboxService,
++    ValidationService,
++    BackendValidatorService,
++    FrontendValidatorService,
++    DatabaseValidatorService,
++  ],
++  exports: [ValidationService],
++})
++export class GenerationModule {}
+diff --git a/backend/src/generation/sandbox.service.ts b/backend/src/generation/sandbox.service.ts
+new file mode 100644
+index 0000000..3062fc7
+--- /dev/null
++++ b/backend/src/generation/sandbox.service.ts
+@@ -0,0 +1,46 @@
++import { Injectable, Logger } from '@nestjs/common';
++import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises';
++import { tmpdir } from 'os';
++import { join, dirname } from 'path';
++import { PrismaService } from '../prisma/prisma.service';
++import { StorageService } from '../storage/storage.service';
++
++/**
++ * §11.3 PRD V1.2 — validasi WAJIB jalan di lingkungan terisolasi/ephemeral,
++ * tidak pernah di container produksi backend/frontend. Service ini cuma
++ * urus materialize file ke direktori sementara; sandboxing docker run yang
++ * sesungguhnya ada di validator per-bahasa.
++ */
++@Injectable()
++export class SandboxService {
++  private readonly logger = new Logger(SandboxService.name);
++
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly storage: StorageService,
++  ) {}
++
++  async materialize(artifactStageId: string, version: number): Promise<string> {
++    const dir = await mkdtemp(join(tmpdir(), 'asf-validate-'));
++    const files = await this.prisma.artifactObject.findMany({ where: { artifactStageId, version } });
++
++    for (const file of files) {
++      const targetPath = join(dir, file.fileName);
++      await mkdir(dirname(targetPath), { recursive: true });
++
++      const stream = await this.storage.getObjectStream(file.bucket, file.objectKey);
++      const chunks: Buffer[] = [];
++      for await (const chunk of stream as any) {
++        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
++      }
++      await writeFile(targetPath, Buffer.concat(chunks));
++    }
++
++    this.logger.log(`Materialized ${files.length} file ke ${dir}`);
++    return dir;
++  }
++
++  async cleanup(dir: string) {
++    await rm(dir, { recursive: true, force: true });
++  }
++}
+diff --git a/backend/src/generation/types.ts b/backend/src/generation/types.ts
+new file mode 100644
+index 0000000..8081522
+--- /dev/null
++++ b/backend/src/generation/types.ts
+@@ -0,0 +1,11 @@
++export interface ValidationResult {
++  passed: boolean;
++  /** Raw compiler/build/migration output — dikirim balik ke n8n untuk LLM Fix Agent. */
++  errorLog?: string;
++}
++
++export interface ValidateStagePayload {
++  projectId: string;
++  stageKey: 'DATABASE' | 'BACKEND' | 'FRONTEND';
++  version: number;
++}
+diff --git a/backend/src/generation/validation.service.ts b/backend/src/generation/validation.service.ts
+new file mode 100644
+index 0000000..c2a0311
+--- /dev/null
++++ b/backend/src/generation/validation.service.ts
+@@ -0,0 +1,89 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { join } from 'path';
++import { PrismaService } from '../prisma/prisma.service';
++import { SandboxService } from './sandbox.service';
++import { BackendValidatorService } from './validators/backend-validator.service';
++import { FrontendValidatorService } from './validators/frontend-validator.service';
++import { DatabaseValidatorService } from './validators/database-validator.service';
++import { StageKey, StageStatus, ValidationStatus } from '@prisma/client';
++import { ValidateStagePayload, ValidationResult } from './types';
++
++const MAX_SELF_HEALING_ATTEMPTS = 3; // §11.4 PRD V1.2
++
++@Injectable()
++export class ValidationService {
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly sandbox: SandboxService,
++    private readonly backendValidator: BackendValidatorService,
++    private readonly frontendValidator: FrontendValidatorService,
++    private readonly databaseValidator: DatabaseValidatorService,
++  ) {}
++
++  /**
++   * Dipanggil node "Validate <Nama>" di n8n setelah generation file-by-file
++   * selesai. Balikan ini yang menentukan n8n lanjut (passed), masuk loop
++   * Self-Heal (canSelfHeal), atau menyerah dan lanjut dengan flag peringatan
++   * (attempts habis).
++   */
++  async validateStage(payload: ValidateStagePayload) {
++    const stage = await this.prisma.artifactStage.findUnique({
++      where: { projectId_stageKey: { projectId: payload.projectId, stageKey: payload.stageKey as StageKey } },
++    });
++    if (!stage) throw new NotFoundException('Stage tidak ditemukan');
++
++    await this.prisma.artifactStage.update({
++      where: { id: stage.id },
++      data: { status: StageStatus.VALIDATING },
++    });
++
++    const result = await this.runValidator(stage.id, payload.stageKey, payload.version);
++
++    if (result.passed) {
++      await this.prisma.artifactStage.update({
++        where: { id: stage.id },
++        data: { status: StageStatus.GENERATED, validationStatus: ValidationStatus.PASSED },
++      });
++      return { passed: true, canSelfHeal: false };
++    }
++
++    const attempts = stage.selfHealingAttempts + 1;
++    const canSelfHeal = attempts <= MAX_SELF_HEALING_ATTEMPTS;
++
++    await this.prisma.artifactStage.update({
++      where: { id: stage.id },
++      data: {
++        status: canSelfHeal ? StageStatus.SELF_HEALING : StageStatus.GENERATED,
++        validationStatus: ValidationStatus.FAILED,
++        selfHealingAttempts: attempts,
++        failedValidation: !canSelfHeal,
++      },
++    });
++
++    return { passed: false, canSelfHeal, errorLog: result.errorLog, attempts };
++  }
++
++  private async runValidator(
++    artifactStageId: string,
++    stageKey: ValidateStagePayload['stageKey'],
++    version: number,
++  ): Promise<ValidationResult> {
++    if (stageKey === 'DATABASE') {
++      const dir = await this.sandbox.materialize(artifactStageId, version);
++      try {
++        return await this.databaseValidator.validate(join(dir, 'migration.sql'));
++      } finally {
++        await this.sandbox.cleanup(dir);
++      }
++    }
++
++    const dir = await this.sandbox.materialize(artifactStageId, version);
++    try {
++      return stageKey === 'BACKEND'
++        ? await this.backendValidator.validate(dir)
++        : await this.frontendValidator.validate(dir);
++    } finally {
++      await this.sandbox.cleanup(dir);
++    }
++  }
++}
+diff --git a/backend/src/generation/validators/backend-validator.service.ts b/backend/src/generation/validators/backend-validator.service.ts
+new file mode 100644
+index 0000000..2270cb5
+--- /dev/null
++++ b/backend/src/generation/validators/backend-validator.service.ts
+@@ -0,0 +1,31 @@
++import { Injectable } from '@nestjs/common';
++import { dockerRun } from '../docker-exec.util';
++import { ValidationResult } from '../types';
++
++/** §11.3 — Backend (NestJS): npm install → tsc --noEmit → PASS/FAIL */
++@Injectable()
++export class BackendValidatorService {
++  async validate(workdir: string): Promise<ValidationResult> {
++    const install = await dockerRun({
++      image: 'node:20-slim',
++      workdir,
++      network: 'bridge',
++      command: ['sh', '-c', 'npm install --no-audit --no-fund'],
++    });
++    if (install.exitCode !== 0 || install.timedOut) {
++      return { passed: false, errorLog: `[npm install]\n${install.stderr || install.stdout}` };
++    }
++
++    const typecheck = await dockerRun({
++      image: 'node:20-slim',
++      workdir,
++      network: 'none',
++      command: ['sh', '-c', 'npx tsc --noEmit'],
++    });
++    if (typecheck.exitCode !== 0 || typecheck.timedOut) {
++      return { passed: false, errorLog: `[tsc --noEmit]\n${typecheck.stderr || typecheck.stdout}` };
++    }
++
++    return { passed: true };
++  }
++}
+diff --git a/backend/src/generation/validators/database-validator.service.ts b/backend/src/generation/validators/database-validator.service.ts
+new file mode 100644
+index 0000000..0e27fb5
+--- /dev/null
++++ b/backend/src/generation/validators/database-validator.service.ts
+@@ -0,0 +1,75 @@
++import { Injectable, Logger } from '@nestjs/common';
++import { spawn } from 'child_process';
++import { randomUUID } from 'crypto';
++import { ValidationResult } from '../types';
++
++function run(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
++  return new Promise((resolve) => {
++    const proc = spawn(cmd, args);
++    let stdout = '';
++    let stderr = '';
++    proc.stdout.on('data', (d) => (stdout += d.toString()));
++    proc.stderr.on('data', (d) => (stderr += d.toString()));
++    proc.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
++  });
++}
++
++/**
++ * §11.3 — Database: apply migration.sql ke instance PostgreSQL sekali pakai
++ * (BUKAN database produksi asli) → PASS/FAIL. Jaringan Docker terpisah per
++ * run, container selalu dibersihkan lewat finally meski gagal/timeout.
++ */
++@Injectable()
++export class DatabaseValidatorService {
++  private readonly logger = new Logger(DatabaseValidatorService.name);
++
++  async validate(migrationSqlPath: string): Promise<ValidationResult> {
++    const runId = randomUUID().slice(0, 8);
++    const networkName = `asf-validate-net-${runId}`;
++    const containerName = `asf-validate-pg-${runId}`;
++
++    await run('docker', ['network', 'create', networkName]);
++
++    try {
++      const start = await run('docker', [
++        'run', '-d', '--rm',
++        '--network', networkName,
++        '--name', containerName,
++        '-e', 'POSTGRES_PASSWORD=validate',
++        '-e', 'POSTGRES_DB=validate',
++        'postgres:16',
++      ]);
++      if (start.code !== 0) return { passed: false, errorLog: `[docker run postgres]\n${start.stderr}` };
++
++      await this.waitForReady(containerName, networkName);
++
++      const apply = await run('docker', [
++        'run', '--rm',
++        '--network', networkName,
++        '-v', `${migrationSqlPath}:/migration.sql:ro`,
++        '-e', 'PGPASSWORD=validate',
++        'postgres:16',
++        'psql', '-h', containerName, '-U', 'postgres', '-d', 'validate', '-v', 'ON_ERROR_STOP=1',
++        '-f', '/migration.sql',
++      ]);
++
++      if (apply.code !== 0) return { passed: false, errorLog: `[psql migration]\n${apply.stderr || apply.stdout}` };
++      return { passed: true };
++    } finally {
++      await run('docker', ['rm', '-f', containerName]);
++      await run('docker', ['network', 'rm', networkName]);
++    }
++  }
++
++  private async waitForReady(containerName: string, networkName: string, attempts = 20) {
++    for (let i = 0; i < attempts; i++) {
++      const check = await run('docker', [
++        'run', '--rm', '--network', networkName, 'postgres:16',
++        'pg_isready', '-h', containerName, '-U', 'postgres',
++      ]);
++      if (check.code === 0) return;
++      await new Promise((r) => setTimeout(r, 500));
++    }
++    this.logger.warn(`Sandbox Postgres ${containerName} tidak siap tepat waktu`);
++  }
++}
+diff --git a/backend/src/generation/validators/frontend-validator.service.ts b/backend/src/generation/validators/frontend-validator.service.ts
+new file mode 100644
+index 0000000..ba735ea
+--- /dev/null
++++ b/backend/src/generation/validators/frontend-validator.service.ts
+@@ -0,0 +1,42 @@
++import { Injectable } from '@nestjs/common';
++import { dockerRun } from '../docker-exec.util';
++import { ValidationResult } from '../types';
++
++/** §11.3 — Frontend (Next.js): npm install → tsc --noEmit → npm run build → PASS/FAIL */
++@Injectable()
++export class FrontendValidatorService {
++  async validate(workdir: string): Promise<ValidationResult> {
++    const install = await dockerRun({
++      image: 'node:20-slim',
++      workdir,
++      network: 'bridge',
++      command: ['sh', '-c', 'npm install --no-audit --no-fund'],
++    });
++    if (install.exitCode !== 0 || install.timedOut) {
++      return { passed: false, errorLog: `[npm install]\n${install.stderr || install.stdout}` };
++    }
++
++    const typecheck = await dockerRun({
++      image: 'node:20-slim',
++      workdir,
++      network: 'none',
++      command: ['sh', '-c', 'npx tsc --noEmit'],
++    });
++    if (typecheck.exitCode !== 0 || typecheck.timedOut) {
++      return { passed: false, errorLog: `[tsc --noEmit]\n${typecheck.stderr || typecheck.stdout}` };
++    }
++
++    const build = await dockerRun({
++      image: 'node:20-slim',
++      workdir,
++      network: 'none',
++      timeoutMs: 8 * 60_000,
++      command: ['sh', '-c', 'npm run build'],
++    });
++    if (build.exitCode !== 0 || build.timedOut) {
++      return { passed: false, errorLog: `[npm run build]\n${build.stderr || build.stdout}` };
++    }
++
++    return { passed: true };
++  }
++}
+diff --git a/backend/src/organizations/members/dto/member.dto.ts b/backend/src/organizations/members/dto/member.dto.ts
+new file mode 100644
+index 0000000..2ccecee
+--- /dev/null
++++ b/backend/src/organizations/members/dto/member.dto.ts
+@@ -0,0 +1,20 @@
++import { IsEmail, IsEnum, IsOptional } from 'class-validator';
++import { OrgRole, MemberStatus } from '@prisma/client';
++
++export class InviteMemberDto {
++  @IsEmail()
++  email: string;
++
++  @IsEnum(OrgRole)
++  role: OrgRole;
++}
++
++export class UpdateMemberDto {
++  @IsOptional()
++  @IsEnum(OrgRole)
++  role?: OrgRole;
++
++  @IsOptional()
++  @IsEnum(MemberStatus)
++  status?: MemberStatus;
++}
+diff --git a/backend/src/organizations/members/mail.service.ts b/backend/src/organizations/members/mail.service.ts
+new file mode 100644
+index 0000000..3664b39
+--- /dev/null
++++ b/backend/src/organizations/members/mail.service.ts
+@@ -0,0 +1,24 @@
++import { Injectable, Logger } from '@nestjs/common';
++
++export interface SendMailInput {
++  to: string;
++  subject: string;
++  body: string;
++}
++
++/**
++ * STUB — repo ini belum punya integrasi SMTP/nodemailer sama sekali (dicek:
++ * tidak ada dependency mail apapun di package.json). Untuk sekarang, invite
++ * dan reminder hanya di-log, bukan benar-benar terkirim. Ganti isi send()
++ * dengan nodemailer + SMTP config begitu itu diprioritaskan.
++ */
++@Injectable()
++export class MailService {
++  private readonly logger = new Logger(MailService.name);
++
++  async send(input: SendMailInput): Promise<void> {
++    this.logger.warn(
++      `[MailService STUB — belum ada SMTP] to=${input.to} subject="${input.subject}" — email TIDAK benar-benar terkirim.`,
++    );
++  }
++}
+diff --git a/backend/src/organizations/members/members.controller.ts b/backend/src/organizations/members/members.controller.ts
+new file mode 100644
+index 0000000..861f4d3
+--- /dev/null
++++ b/backend/src/organizations/members/members.controller.ts
+@@ -0,0 +1,50 @@
++import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
++import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
++import { RolesGuard } from '../../common/rbac/roles.guard';
++import { Roles } from '../../common/rbac/roles.decorator';
++import { OrgRole } from '@prisma/client';
++import { MembersService } from './members.service';
++import { InviteMemberDto, UpdateMemberDto } from './dto/member.dto';
++
++@Controller('organizations/:organizationId/members')
++@UseGuards(JwtAuthGuard, RolesGuard)
++export class MembersController {
++  constructor(private readonly members: MembersService) {}
++
++  @Get()
++  list(@Param('organizationId') organizationId: string) {
++    return this.members.list(organizationId);
++  }
++
++  @Post('invite')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  invite(
++    @Param('organizationId') organizationId: string,
++    @Req() req: Request & { user: { userId: string } },
++    @Body() dto: InviteMemberDto,
++  ) {
++    return this.members.invite(organizationId, req.user.userId, dto);
++  }
++
++  @Post(':memberId/resend-invite')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  resend(@Param('organizationId') organizationId: string, @Param('memberId') memberId: string) {
++    return this.members.resendInvite(organizationId, memberId);
++  }
++
++  @Patch(':memberId')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  update(
++    @Param('organizationId') organizationId: string,
++    @Param('memberId') memberId: string,
++    @Body() dto: UpdateMemberDto,
++  ) {
++    return this.members.update(organizationId, memberId, dto);
++  }
++
++  @Delete(':memberId')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  remove(@Param('organizationId') organizationId: string, @Param('memberId') memberId: string) {
++    return this.members.remove(organizationId, memberId);
++  }
++}
+diff --git a/backend/src/organizations/members/members.module.ts b/backend/src/organizations/members/members.module.ts
+new file mode 100644
+index 0000000..90b1262
+--- /dev/null
++++ b/backend/src/organizations/members/members.module.ts
+@@ -0,0 +1,13 @@
++import { Module } from '@nestjs/common';
++import { MembersController } from './members.controller';
++import { MembersService } from './members.service';
++import { MailService } from './mail.service';
++import { RbacModule } from '../../common/rbac/rbac.module';
++
++@Module({
++  imports: [RbacModule],
++  controllers: [MembersController],
++  providers: [MembersService, MailService],
++  exports: [MailService],
++})
++export class MembersModule {}
+diff --git a/backend/src/organizations/members/members.service.ts b/backend/src/organizations/members/members.service.ts
+new file mode 100644
+index 0000000..ef73c48
+--- /dev/null
++++ b/backend/src/organizations/members/members.service.ts
+@@ -0,0 +1,94 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { PrismaService } from '../../prisma/prisma.service';
++import { MailService } from './mail.service';
++import { InviteMemberDto, UpdateMemberDto } from './dto/member.dto';
++import { MemberStatus, OrgRole } from '@prisma/client';
++
++@Injectable()
++export class MembersService {
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly mail: MailService,
++  ) {}
++
++  list(organizationId: string) {
++    return this.prisma.organizationMember.findMany({
++      where: { organizationId },
++      include: { user: { select: { id: true, email: true, name: true } } },
++      orderBy: { invitedAt: 'asc' },
++    });
++  }
++
++  /** FR-602 Invite Member — find-or-create User by email, buat membership INVITED. */
++  async invite(organizationId: string, invitedBy: string, dto: InviteMemberDto) {
++    const existing = await this.prisma.organizationMember.findFirst({
++      where: { organizationId, user: { email: dto.email } },
++    });
++    if (existing) throw new BadRequestException('User ini sudah jadi member organisasi ini');
++
++    const user = await this.prisma.user.upsert({
++      where: { email: dto.email },
++      update: {},
++      create: { email: dto.email },
++    });
++
++    const member = await this.prisma.organizationMember.create({
++      data: { organizationId, userId: user.id, role: dto.role, status: MemberStatus.INVITED, invitedBy },
++    });
++
++    await this.mail.send({
++      to: dto.email,
++      subject: 'Undangan bergabung ke AI Software Factory',
++      body: `Anda diundang bergabung ke organisasi (ID: ${organizationId}) sebagai ${dto.role}.`,
++    });
++
++    return member;
++  }
++
++  /** FR-603 Resend Invitation */
++  async resendInvite(organizationId: string, memberId: string) {
++    const member = await this.findOrThrow(organizationId, memberId);
++    if (member.status !== MemberStatus.INVITED) {
++      throw new BadRequestException('Member ini sudah bergabung, tidak perlu diundang ulang');
++    }
++    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: member.userId } });
++    await this.mail.send({
++      to: user.email,
++      subject: 'Undangan bergabung ke AI Software Factory (kirim ulang)',
++      body: `Anda diundang bergabung ke organisasi (ID: ${organizationId}).`,
++    });
++    return { resent: true };
++  }
++
++  /** FR-604 Activate / Deactivate Member, dan ubah role */
++  async update(organizationId: string, memberId: string, dto: UpdateMemberDto) {
++    const member = await this.findOrThrow(organizationId, memberId);
++
++    if (member.role === OrgRole.OWNER && dto.role && dto.role !== OrgRole.OWNER) {
++      throw new BadRequestException('Owner organisasi tidak bisa di-demote lewat endpoint ini');
++    }
++
++    return this.prisma.organizationMember.update({
++      where: { id: memberId },
++      data: {
++        role: dto.role,
++        status: dto.status,
++        joinedAt: dto.status === MemberStatus.ACTIVE && !member.joinedAt ? new Date() : undefined,
++      },
++    });
++  }
++
++  /** FR-605 Remove Member */
++  async remove(organizationId: string, memberId: string) {
++    const member = await this.findOrThrow(organizationId, memberId);
++    if (member.role === OrgRole.OWNER) throw new BadRequestException('Owner organisasi tidak bisa dihapus');
++    await this.prisma.organizationMember.delete({ where: { id: memberId } });
++    return { removed: true };
++  }
++
++  private async findOrThrow(organizationId: string, memberId: string) {
++    const member = await this.prisma.organizationMember.findFirst({ where: { id: memberId, organizationId } });
++    if (!member) throw new NotFoundException('Member tidak ditemukan');
++    return member;
++  }
++}
+diff --git a/backend/src/organizations/teams/dto/team.dto.ts b/backend/src/organizations/teams/dto/team.dto.ts
+new file mode 100644
+index 0000000..1bddc68
+--- /dev/null
++++ b/backend/src/organizations/teams/dto/team.dto.ts
+@@ -0,0 +1,23 @@
++import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
++
++export class CreateTeamDto {
++  @IsString()
++  @MinLength(2)
++  @MaxLength(80)
++  name: string;
++
++  @IsOptional()
++  @IsString()
++  @MaxLength(280)
++  description?: string;
++}
++
++export class AddTeamMemberDto {
++  @IsString()
++  organizationMemberId: string;
++
++  @IsOptional()
++  @IsString()
++  @MaxLength(80)
++  jobTitle?: string;
++}
+diff --git a/backend/src/organizations/teams/teams.controller.ts b/backend/src/organizations/teams/teams.controller.ts
+new file mode 100644
+index 0000000..fb7980c
+--- /dev/null
++++ b/backend/src/organizations/teams/teams.controller.ts
+@@ -0,0 +1,44 @@
++import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
++import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
++import { RolesGuard } from '../../common/rbac/roles.guard';
++import { Roles } from '../../common/rbac/roles.decorator';
++import { OrgRole } from '@prisma/client';
++import { TeamsService } from './teams.service';
++import { CreateTeamDto, AddTeamMemberDto } from './dto/team.dto';
++
++@Controller('organizations/:organizationId/teams')
++@UseGuards(JwtAuthGuard, RolesGuard)
++export class TeamsController {
++  constructor(private readonly teams: TeamsService) {}
++
++  @Post()
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  create(@Param('organizationId') organizationId: string, @Body() dto: CreateTeamDto) {
++    return this.teams.create(organizationId, dto);
++  }
++
++  @Get()
++  list(@Param('organizationId') organizationId: string) {
++    return this.teams.list(organizationId);
++  }
++
++  @Post(':teamId/members')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  addMember(
++    @Param('organizationId') organizationId: string,
++    @Param('teamId') teamId: string,
++    @Body() dto: AddTeamMemberDto,
++  ) {
++    return this.teams.addMember(organizationId, teamId, dto);
++  }
++
++  @Delete(':teamId/members/:teamMemberId')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  removeMember(
++    @Param('organizationId') organizationId: string,
++    @Param('teamId') teamId: string,
++    @Param('teamMemberId') teamMemberId: string,
++  ) {
++    return this.teams.removeMember(organizationId, teamId, teamMemberId);
++  }
++}
+diff --git a/backend/src/organizations/teams/teams.module.ts b/backend/src/organizations/teams/teams.module.ts
+new file mode 100644
+index 0000000..8d9104c
+--- /dev/null
++++ b/backend/src/organizations/teams/teams.module.ts
+@@ -0,0 +1,11 @@
++import { Module } from '@nestjs/common';
++import { TeamsController } from './teams.controller';
++import { TeamsService } from './teams.service';
++import { RbacModule } from '../../common/rbac/rbac.module';
++
++@Module({
++  imports: [RbacModule],
++  controllers: [TeamsController],
++  providers: [TeamsService],
++})
++export class TeamsModule {}
+diff --git a/backend/src/organizations/teams/teams.service.ts b/backend/src/organizations/teams/teams.service.ts
+new file mode 100644
+index 0000000..415477a
+--- /dev/null
++++ b/backend/src/organizations/teams/teams.service.ts
+@@ -0,0 +1,48 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { PrismaService } from '../../prisma/prisma.service';
++import { CreateTeamDto, AddTeamMemberDto } from './dto/team.dto';
++
++@Injectable()
++export class TeamsService {
++  constructor(private readonly prisma: PrismaService) {}
++
++  create(organizationId: string, dto: CreateTeamDto) {
++    return this.prisma.team.create({
++      data: { organizationId, name: dto.name, description: dto.description },
++    });
++  }
++
++  list(organizationId: string) {
++    return this.prisma.team.findMany({
++      where: { organizationId },
++      include: { members: { include: { member: { include: { user: true } } } } },
++      orderBy: { createdAt: 'asc' },
++    });
++  }
++
++  private async findOrThrow(organizationId: string, teamId: string) {
++    const team = await this.prisma.team.findFirst({ where: { id: teamId, organizationId } });
++    if (!team) throw new NotFoundException('Team tidak ditemukan');
++    return team;
++  }
++
++  async addMember(organizationId: string, teamId: string, dto: AddTeamMemberDto) {
++    await this.findOrThrow(organizationId, teamId);
++
++    const orgMember = await this.prisma.organizationMember.findFirst({
++      where: { id: dto.organizationMemberId, organizationId },
++    });
++    if (!orgMember) throw new NotFoundException('Member organisasi tidak ditemukan');
++
++    return this.prisma.teamMember.upsert({
++      where: { teamId_organizationMemberId: { teamId, organizationMemberId: dto.organizationMemberId } },
++      update: { jobTitle: dto.jobTitle },
++      create: { teamId, organizationMemberId: dto.organizationMemberId, jobTitle: dto.jobTitle },
++    });
++  }
++
++  async removeMember(organizationId: string, teamId: string, teamMemberId: string) {
++    await this.findOrThrow(organizationId, teamId);
++    return this.prisma.teamMember.delete({ where: { id: teamMemberId } });
++  }
++}
+diff --git a/backend/src/projects/dto/set-deadline.dto.ts b/backend/src/projects/dto/set-deadline.dto.ts
+new file mode 100644
+index 0000000..c3b08b4
+--- /dev/null
++++ b/backend/src/projects/dto/set-deadline.dto.ts
+@@ -0,0 +1,6 @@
++import { IsDateString } from 'class-validator';
++
++export class SetProjectDeadlineDto {
++  @IsDateString()
++  deadlineAt: string;
++}
+diff --git a/backend/src/projects/projects.controller.ts b/backend/src/projects/projects.controller.ts
+index a616abb..c994a3b 100644
+--- a/backend/src/projects/projects.controller.ts
++++ b/backend/src/projects/projects.controller.ts
+@@ -4,14 +4,20 @@ import {
+   Param,
+   ParseUUIDPipe,
+   Post,
++  Put,
+   Body,
++  Req,
+   Res,
+   StreamableFile,
+   UseGuards,
+ } from '@nestjs/common';
+ import { Response } from 'express';
+ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
++import { RolesGuard } from '../common/rbac/roles.guard';
++import { Roles } from '../common/rbac/roles.decorator';
++import { OrgRole } from '@prisma/client';
+ import { CreateProjectDto } from './dto/create-project.dto';
++import { SetProjectDeadlineDto } from './dto/set-deadline.dto';
+ import { ProjectsService } from './projects.service';
+ 
+ @Controller('projects')
+@@ -20,8 +26,13 @@ export class ProjectsController {
+   constructor(private readonly projectsService: ProjectsService) {}
+ 
+   @Post()
+-  create(@Body() dto: CreateProjectDto) {
+-    return this.projectsService.create(dto);
++  create(
++    @Body() dto: CreateProjectDto,
++    @Req() req: Request & { user: { userId: string } },
++  ) {
++    // V1.2: creator is now recorded — see ProjectsService.create() for why
++    // (organizationId + createdById, S3 folder root, RBAC).
++    return this.projectsService.create(dto, req.user.userId);
+   }
+ 
+   @Get()
+@@ -34,6 +45,14 @@ export class ProjectsController {
+     return this.projectsService.findOne(id);
+   }
+ 
++  // V1.2 FR-802 — Set Project Deadline (RolesGuard resolves membership via :id)
++  @Put(':id/deadline')
++  @UseGuards(RolesGuard)
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  setDeadline(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetProjectDeadlineDto) {
++    return this.projectsService.setDeadline(id, dto);
++  }
++
+   // V1.1
+   @Get(':id/download')
+   async download(
+diff --git a/backend/src/projects/projects.module.ts b/backend/src/projects/projects.module.ts
+index 45654e3..06cb658 100644
+--- a/backend/src/projects/projects.module.ts
++++ b/backend/src/projects/projects.module.ts
+@@ -1,8 +1,10 @@
+ import { Module } from '@nestjs/common';
+ import { ProjectsController } from './projects.controller';
+ import { ProjectsService } from './projects.service';
++import { RbacModule } from '../common/rbac/rbac.module';
+ 
+ @Module({
++  imports: [RbacModule],
+   controllers: [ProjectsController],
+   providers: [ProjectsService],
+   exports: [ProjectsService],
+diff --git a/backend/src/projects/projects.service.ts b/backend/src/projects/projects.service.ts
+index 126f295..4396aa8 100644
+--- a/backend/src/projects/projects.service.ts
++++ b/backend/src/projects/projects.service.ts
+@@ -7,6 +7,7 @@ import { ProjectStatus, StageStatus } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
+ import { STAGE_LABELS, STAGE_ORDER } from '../common/stage-order';
+ import { CreateProjectDto } from './dto/create-project.dto';
++import { SetProjectDeadlineDto } from './dto/set-deadline.dto';
+ 
+ // V1.1: nama file di dalam project.zip untuk tiap stage. Konten stage disimpan sebagai teks
+ // di database (tidak ada object storage terpisah) — endpoint download menyusun zip on-the-fly.
+@@ -28,13 +29,26 @@ export class ProjectsService {
+     private readonly config: ConfigService,
+   ) {}
+ 
+-  async create(dto: CreateProjectDto) {
++  async create(dto: CreateProjectDto, createdById: string) {
++    // V1.2: resolve the caller's organization so the project is scoped to
++    // it (RBAC, Team assignment, S3 folder root all depend on this).
++    // AuthService.ensureOwnerOrganization() guarantees every user has at
++    // least one by the time they can log in, so this should always resolve
++    // — the null fallback only protects against pre-V1.2 rows/edge cases.
++    const membership = await this.prisma.organizationMember.findFirst({
++      where: { userId: createdById, status: 'ACTIVE' },
++      orderBy: { invitedAt: 'asc' },
++      select: { organizationId: true },
++    });
++
+     const project = await this.prisma.project.create({
+       data: {
+         name: dto.name,
+         businessIdea: dto.businessIdea,
+         knowledgeBaseId: dto.knowledgeBaseId,
+         aiModel: dto.aiModel ?? 'gpt-5-mini',
++        organizationId: membership?.organizationId,
++        createdById,
+         stages: {
+           create: STAGE_ORDER.map((stageKey) => ({ stageKey, status: StageStatus.PENDING })),
+         },
+@@ -49,7 +63,7 @@ export class ProjectsService {
+         businessIdea: project.businessIdea,
+         knowledgeBaseId: project.knowledgeBaseId,
+         aiModel: project.aiModel,
+-        userId: 'app',
++        userId: createdById, // BUGFIX: was hardcoded 'app', n8n never knew who actually started the project
+       });
+     } catch (err) {
+       // Project row stays as a record even if n8n couldn't be reached —
+@@ -62,6 +76,11 @@ export class ProjectsService {
+     return this.withCurrentStage(project);
+   }
+ 
++  /** V1.2 FR-802 */
++  setDeadline(id: string, dto: SetProjectDeadlineDto) {
++    return this.prisma.project.update({ where: { id }, data: { deadlineAt: new Date(dto.deadlineAt) } });
++  }
++
+   async findAll() {
+     const projects = await this.prisma.project.findMany({
+       include: { stages: true },
+diff --git a/backend/src/stages/dto/decide-stage.dto.ts b/backend/src/stages/dto/decide-stage.dto.ts
+index 7d26611..fd86a81 100644
+--- a/backend/src/stages/dto/decide-stage.dto.ts
++++ b/backend/src/stages/dto/decide-stage.dto.ts
+@@ -1,11 +1,21 @@
+-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
++import { IsDateString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+ 
+ export class DecideStageDto {
+-  @IsIn(['approved', 'rejected'])
+-  decision: 'approved' | 'rejected';
++  @IsIn(['approved', 'rejected', 'revision_requested']) // V1.2: added revision_requested (§9 PRD V1.2)
++  decision: 'approved' | 'rejected' | 'revision_requested';
+ 
+   @IsOptional()
+   @IsString()
+   @MaxLength(2000)
+   comment?: string;
+ }
++
++export class AssignStageDto {
++  @IsString()
++  assignedMemberId: string;
++}
++
++export class SetDeadlineDto {
++  @IsDateString()
++  deadlineAt: string;
++}
+diff --git a/backend/src/stages/stages.controller.ts b/backend/src/stages/stages.controller.ts
+index c129556..0d0a6c3 100644
+--- a/backend/src/stages/stages.controller.ts
++++ b/backend/src/stages/stages.controller.ts
+@@ -1,21 +1,85 @@
+-import { Body, Controller, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
++import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
+ import { StageKey } from '@prisma/client';
+ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+-import { DecideStageDto } from './dto/decide-stage.dto';
++import { RolesGuard } from '../common/rbac/roles.guard';
++import { Roles } from '../common/rbac/roles.decorator';
++import { OrgRole } from '@prisma/client';
++import { DecideStageDto, AssignStageDto, SetDeadlineDto } from './dto/decide-stage.dto';
+ import { StagesService } from './stages.service';
++import { PrismaService } from '../prisma/prisma.service';
++import { StorageService } from '../storage/storage.service';
+ 
+ @Controller('projects/:projectId/stages')
+-@UseGuards(JwtAuthGuard)
++@UseGuards(JwtAuthGuard, RolesGuard)
+ export class StagesController {
+-  constructor(private readonly stagesService: StagesService) {}
++  constructor(
++    private readonly stagesService: StagesService,
++    private readonly prisma: PrismaService,
++    private readonly storage: StorageService,
++  ) {}
+ 
++  // V1.2 FR-801 — assignment butuh Owner/Admin, resolusi via :projectId (bukan :organizationId)
++  @Put(':stageKey/assignment')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  assign(
++    @Param('projectId', ParseUUIDPipe) projectId: string,
++    @Param('stageKey') stageKey: StageKey,
++    @Body() dto: AssignStageDto,
++    @Req() req: Request & { user: { userId: string } },
++  ) {
++    return this.stagesService.assign(projectId, stageKey, dto, req.user.userId);
++  }
++
++  // V1.2 FR-803
++  @Put(':stageKey/deadline')
++  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
++  setDeadline(
++    @Param('projectId', ParseUUIDPipe) projectId: string,
++    @Param('stageKey') stageKey: StageKey,
++    @Body() dto: SetDeadlineDto,
++  ) {
++    return this.stagesService.setDeadline(projectId, stageKey, dto);
++  }
++
++  @Get(':stageKey/revisions')
++  revisions(@Param('projectId', ParseUUIDPipe) projectId: string, @Param('stageKey') stageKey: StageKey) {
++    return this.stagesService.revisions(projectId, stageKey);
++  }
++
++  // V1.2 §10 — daftar file (metadata) hasil generation file-by-file
++  @Get(':stageKey/files')
++  async files(@Param('projectId', ParseUUIDPipe) projectId: string, @Param('stageKey') stageKey: StageKey) {
++    const stage = await this.prisma.artifactStage.findUniqueOrThrow({
++      where: { projectId_stageKey: { projectId, stageKey } },
++    });
++    return this.prisma.artifactObject.findMany({
++      where: { artifactStageId: stage.id },
++      orderBy: [{ fileName: 'asc' }, { version: 'desc' }],
++    });
++  }
++
++  @Get(':stageKey/files/:fileId/download-url')
++  async downloadUrl(@Param('fileId') fileId: string) {
++    const file = await this.prisma.artifactObject.findUniqueOrThrow({ where: { id: fileId } });
++    const url = await this.storage.getPresignedDownloadUrl(file.bucket, file.objectKey);
++    return { url, expiresInSeconds: 900 };
++  }
++
++  // Tidak dibatasi @Roles() di sini — permission per-stage (assignment-based
++  // untuk MEMBER) dicek di dalam StagesService.decide() itu sendiri, karena
++  // butuh tahu stageKey mana yang di-assign, bukan sekadar role global.
+   @Post(':stageKey/decision')
+   decide(
+     @Param('projectId', ParseUUIDPipe) projectId: string,
+     @Param('stageKey') stageKey: StageKey,
+     @Body() dto: DecideStageDto,
+-    @Req() req: Request & { user: { email: string } },
++    @Req() req: Request & { user: { userId: string; email: string }; member: { id: string; role: OrgRole } },
+   ) {
+-    return this.stagesService.decide(projectId, stageKey, dto, req.user.email);
++    return this.stagesService.decide(projectId, stageKey, dto, {
++      userId: req.user.userId,
++      email: req.user.email,
++      memberId: req.member.id,
++      role: req.member.role,
++    });
+   }
+ }
+diff --git a/backend/src/stages/stages.module.ts b/backend/src/stages/stages.module.ts
+index 66bde75..8fd7d81 100644
+--- a/backend/src/stages/stages.module.ts
++++ b/backend/src/stages/stages.module.ts
+@@ -1,8 +1,11 @@
+ import { Module } from '@nestjs/common';
+ import { StagesController } from './stages.controller';
+ import { StagesService } from './stages.service';
++import { RbacModule } from '../common/rbac/rbac.module';
++import { StorageModule } from '../storage/storage.module';
+ 
+ @Module({
++  imports: [RbacModule, StorageModule],
+   controllers: [StagesController],
+   providers: [StagesService],
+ })
+diff --git a/backend/src/stages/stages.service.ts b/backend/src/stages/stages.service.ts
+index e0e8e66..7c3ecac 100644
+--- a/backend/src/stages/stages.service.ts
++++ b/backend/src/stages/stages.service.ts
+@@ -1,24 +1,69 @@
+-import { BadGatewayException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
++import {
++  BadGatewayException,
++  BadRequestException,
++  ConflictException,
++  ForbiddenException,
++  Injectable,
++  NotFoundException,
++} from '@nestjs/common';
+ import axios from 'axios';
+-import { ProjectStatus, StageKey, StageStatus } from '@prisma/client';
++import { OrgRole, ProjectStatus, StageKey, StageStatus } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
+-import { DecideStageDto } from './dto/decide-stage.dto';
++import { DecideStageDto, AssignStageDto, SetDeadlineDto } from './dto/decide-stage.dto';
++
++interface CallerContext {
++  userId: string;
++  email: string;
++  memberId: string;
++  role: OrgRole;
++}
+ 
+ @Injectable()
+ export class StagesService {
+   constructor(private readonly prisma: PrismaService) {}
+ 
+-  async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, approverEmail: string) {
++  /** V1.2 FR-801 — Assign Approver per Stage */
++  async assign(projectId: string, stageKey: StageKey, dto: AssignStageDto, assignedBy: string) {
++    await this.assertMemberBelongsToProjectOrg(projectId, dto.assignedMemberId);
++
++    return this.prisma.stageAssignment.upsert({
++      where: { projectId_stageKey: { projectId, stageKey } },
++      update: { assignedMemberId: dto.assignedMemberId, assignedBy, assignedAt: new Date() },
++      create: { projectId, stageKey, assignedMemberId: dto.assignedMemberId, assignedBy },
++    });
++  }
++
++  /** V1.2 FR-803 — Set Stage Deadline */
++  setDeadline(projectId: string, stageKey: StageKey, dto: SetDeadlineDto) {
++    return this.prisma.artifactStage.update({
++      where: { projectId_stageKey: { projectId, stageKey } },
++      data: { deadlineAt: new Date(dto.deadlineAt) },
++    });
++  }
++
++  /** V1.2 FR-1203 — revision history untuk satu stage */
++  async revisions(projectId: string, stageKey: StageKey) {
++    const stage = await this.prisma.artifactStage.findUniqueOrThrow({
++      where: { projectId_stageKey: { projectId, stageKey } },
++    });
++    return this.prisma.revisionRequest.findMany({
++      where: { artifactStageId: stage.id },
++      orderBy: { requestedAt: 'desc' },
++    });
++  }
++
++  /**
++   * §9 PRD V1.2 — Approve / Reject / Request Revision. Satu-satunya tempat
++   * yang boleh memanggil resumeUrl n8n (sama seperti sebelumnya), sekarang
++   * juga satu-satunya tempat yang menegakkan permission per-stage (§7.1).
++   */
++  async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, caller: CallerContext) {
+     const stage = await this.prisma.artifactStage.findUnique({
+       where: { projectId_stageKey: { projectId, stageKey } },
+     });
+     if (!stage) throw new NotFoundException('Stage tidak ditemukan');
+ 
+     if (stage.status !== StageStatus.GENERATED) {
+-      // Covers: not generated yet, or already decided. This is what stops
+-      // the "clicked resume twice" problem from before — once a decision
+-      // is recorded here, the resumeUrl is cleared and this guard blocks
+-      // any further attempt to reuse it.
+       throw new ConflictException(
+         `Stage ini berstatus "${stage.status}" — tidak bisa diputuskan lagi.`,
+       );
+@@ -27,11 +72,39 @@ export class StagesService {
+       throw new ConflictException('Stage ini belum punya resume URL dari n8n. Coba lagi sebentar.');
+     }
+ 
++    await this.assertCanDecide(projectId, stageKey, caller);
++
++    if (dto.decision === 'revision_requested') {
++      if (!dto.comment) throw new BadRequestException('comment wajib diisi untuk request revision');
++
++      try {
++        await axios.post(stage.resumeUrl, { decision: 'revision', note: dto.comment, approver: caller.email });
++      } catch (err) {
++        throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
++      }
++
++      const nextRevisionNumber = stage.revisionCount + 1;
++      return this.prisma.$transaction(async (tx) => {
++        await tx.revisionRequest.create({
++          data: {
++            artifactStageId: stage.id,
++            comment: dto.comment!,
++            requestedBy: caller.email,
++            revisionNumber: nextRevisionNumber,
++          },
++        });
++        return tx.artifactStage.update({
++          where: { id: stage.id },
++          data: { status: StageStatus.REVISION_REQUESTED, revisionCount: nextRevisionNumber, resumeUrl: null },
++        });
++      });
++    }
++
+     try {
+       await axios.post(stage.resumeUrl, {
+         decision: dto.decision,
+         comment: dto.comment ?? '',
+-        approver: approverEmail,
++        approver: caller.email,
+       });
+     } catch (err) {
+       throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
+@@ -42,19 +115,48 @@ export class StagesService {
+       data: {
+         status: dto.decision === 'approved' ? StageStatus.APPROVED : StageStatus.REJECTED,
+         comment: dto.comment,
+-        decidedBy: approverEmail,
++        decidedBy: caller.email, // legacy free-text field, kept for backward compat
++        decidedById: caller.userId,
+         decidedAt: new Date(),
+         resumeUrl: null,
+       },
+     });
+ 
+     if (dto.decision === 'rejected') {
+-      await this.prisma.project.update({
+-        where: { id: projectId },
+-        data: { status: ProjectStatus.REJECTED },
+-      });
++      await this.prisma.project.update({ where: { id: projectId }, data: { status: ProjectStatus.REJECTED } });
+     }
+ 
+     return updated;
+   }
++
++  /**
++   * §7.1 permission check:
++   *  - OWNER/ADMIN: selalu boleh (fallback approver).
++   *  - MEMBER: hanya boleh jika di-assign ke stage ini.
++   *  - VIEWER: tidak pernah boleh.
++   */
++  private async assertCanDecide(projectId: string, stageKey: StageKey, caller: CallerContext) {
++    if (caller.role === OrgRole.OWNER || caller.role === OrgRole.ADMIN) return;
++    if (caller.role === OrgRole.VIEWER) {
++      throw new ForbiddenException('Viewer tidak bisa approve/reject/request revision');
++    }
++
++    const assignment = await this.prisma.stageAssignment.findUnique({
++      where: { projectId_stageKey: { projectId, stageKey } },
++    });
++    if (!assignment || assignment.assignedMemberId !== caller.memberId) {
++      throw new ForbiddenException('Anda tidak di-assign sebagai approver untuk stage ini');
++    }
++  }
++
++  private async assertMemberBelongsToProjectOrg(projectId: string, memberId: string) {
++    const project = await this.prisma.project.findUniqueOrThrow({
++      where: { id: projectId },
++      select: { organizationId: true },
++    });
++    const member = await this.prisma.organizationMember.findFirst({
++      where: { id: memberId, organizationId: project.organizationId ?? undefined },
++    });
++    if (!member) throw new BadRequestException('Member ini bukan bagian dari organisasi project ini');
++  }
+ }
+diff --git a/backend/src/storage/storage.module.ts b/backend/src/storage/storage.module.ts
+new file mode 100644
+index 0000000..9183e1b
+--- /dev/null
++++ b/backend/src/storage/storage.module.ts
+@@ -0,0 +1,8 @@
++import { Module } from '@nestjs/common';
++import { StorageService } from './storage.service';
++
++@Module({
++  providers: [StorageService],
++  exports: [StorageService],
++})
++export class StorageModule {}
+diff --git a/backend/src/storage/storage.service.ts b/backend/src/storage/storage.service.ts
+new file mode 100644
+index 0000000..64b8889
+--- /dev/null
++++ b/backend/src/storage/storage.service.ts
+@@ -0,0 +1,101 @@
++import { Injectable } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import { createHash } from 'crypto';
++import {
++  S3Client,
++  PutObjectCommand,
++  GetObjectCommand,
++} from '@aws-sdk/client-s3';
++import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
++import { PrismaService } from '../prisma/prisma.service';
++
++export interface UploadArtifactInput {
++  artifactStageId: string;
++  createdById: string; // pemilik project — root folder, sesuai laporan bug
++  projectId: string;
++  stageKey: string; // lowercase, mis. "backend" — dipakai sebagai namespace nama file, bukan folder utama
++  fileName: string; // mis. "src/main.ts" atau "PRD.md"
++  content: Buffer;
++  mimeType: string;
++  version?: number;
++}
++
++/**
++ * S3-compatible object storage (§10 PRD V1.2). Bekerja dengan AWS S3, MinIO,
++ * R2, atau Wasabi lewat endpoint yang bisa dikonfigurasi — jangan hard-code
++ * ke satu provider.
++ *
++ * Struktur folder SESUAI LAPORAN BUG: users/{userId}/projects/{projectId}/artifacts/...
++ * (bukan organizations/{orgId}/projects/{projectId}/stages/...). stageKey
++ * tetap direkam sebagai prefix nama file supaya dua stage yang kebetulan
++ * menghasilkan nama file sama (mis. dua-duanya bikin "README.md") tidak
++ * saling timpa.
++ */
++@Injectable()
++export class StorageService {
++  private readonly client: S3Client;
++  private readonly bucket: string;
++  private readonly provider: string;
++
++  constructor(
++    private readonly config: ConfigService,
++    private readonly prisma: PrismaService,
++  ) {
++    this.bucket = this.config.getOrThrow<string>('STORAGE_BUCKET');
++    this.provider = this.config.get<string>('STORAGE_PROVIDER', 'minio');
++
++    this.client = new S3Client({
++      endpoint: this.config.getOrThrow<string>('STORAGE_ENDPOINT'),
++      region: this.config.get<string>('STORAGE_REGION', 'us-east-1'),
++      forcePathStyle: true, // wajib untuk MinIO
++      credentials: {
++        accessKeyId: this.config.getOrThrow<string>('STORAGE_ACCESS_KEY'),
++        secretAccessKey: this.config.getOrThrow<string>('STORAGE_SECRET_KEY'),
++      },
++    });
++  }
++
++  buildKey(createdById: string, projectId: string, version: number, namespacedFileName: string) {
++    return `asf/users/${createdById}/projects/${projectId}/artifacts/v${version}/${namespacedFileName}`;
++  }
++
++  async uploadArtifact(input: UploadArtifactInput) {
++    const version = input.version ?? 1;
++    const namespacedFileName = `${input.stageKey}/${input.fileName}`;
++    const objectKey = this.buildKey(input.createdById, input.projectId, version, namespacedFileName);
++    const checksum = createHash('sha256').update(input.content).digest('hex');
++
++    await this.client.send(
++      new PutObjectCommand({
++        Bucket: this.bucket,
++        Key: objectKey,
++        Body: input.content,
++        ContentType: input.mimeType,
++      }),
++    );
++
++    return this.prisma.artifactObject.create({
++      data: {
++        artifactStageId: input.artifactStageId,
++        fileName: input.fileName,
++        storageProvider: this.provider,
++        bucket: this.bucket,
++        objectKey,
++        size: input.content.byteLength,
++        mimeType: input.mimeType,
++        checksum,
++        version,
++      },
++    });
++  }
++
++  async getObjectStream(bucket: string, objectKey: string) {
++    const result = await this.client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
++    return result.Body; // Readable stream
++  }
++
++  async getPresignedDownloadUrl(bucket: string, objectKey: string, expiresInSeconds = 900) {
++    const command = new GetObjectCommand({ Bucket: bucket, Key: objectKey });
++    return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
++  }
++}
+diff --git a/backend/src/webhooks/dto/upload-file.dto.ts b/backend/src/webhooks/dto/upload-file.dto.ts
+new file mode 100644
+index 0000000..96a6105
+--- /dev/null
++++ b/backend/src/webhooks/dto/upload-file.dto.ts
+@@ -0,0 +1,23 @@
++import { IsEnum, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
++import { StageKey } from '@prisma/client';
++
++export class UploadFileDto {
++  @IsUUID()
++  projectId: string;
++
++  @IsEnum(StageKey)
++  stageKey: StageKey;
++
++  @IsString()
++  fileName: string;
++
++  @IsString()
++  contentBase64: string;
++
++  @IsString()
++  mimeType: string;
++
++  @IsOptional()
++  @IsInt()
++  version?: number;
++}
+diff --git a/backend/src/webhooks/dto/validate-stage.dto.ts b/backend/src/webhooks/dto/validate-stage.dto.ts
+new file mode 100644
+index 0000000..669a92c
+--- /dev/null
++++ b/backend/src/webhooks/dto/validate-stage.dto.ts
+@@ -0,0 +1,12 @@
++import { IsIn, IsInt, IsUUID } from 'class-validator';
++
++export class ValidateStageDto {
++  @IsUUID()
++  projectId: string;
++
++  @IsIn(['DATABASE', 'BACKEND', 'FRONTEND'])
++  stageKey: 'DATABASE' | 'BACKEND' | 'FRONTEND';
++
++  @IsInt()
++  version: number;
++}
+diff --git a/backend/src/webhooks/webhooks.controller.ts b/backend/src/webhooks/webhooks.controller.ts
+index c0faec9..c5971e0 100644
+--- a/backend/src/webhooks/webhooks.controller.ts
++++ b/backend/src/webhooks/webhooks.controller.ts
+@@ -2,6 +2,8 @@ import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs
+ import { N8nWebhookGuard } from './n8n-webhook.guard';
+ import { StageReadyDto } from './dto/stage-ready.dto';
+ import { WorkflowEventDto } from './dto/workflow-event.dto';
++import { UploadFileDto } from './dto/upload-file.dto';
++import { ValidateStageDto } from './dto/validate-stage.dto';
+ import { WebhooksService } from './webhooks.service';
+ 
+ @Controller('webhooks/n8n')
+@@ -20,4 +22,18 @@ export class WebhooksController {
+   workflowCompleted(@Body() dto: WorkflowEventDto) {
+     return this.webhooksService.handleWorkflowEvent(dto);
+   }
++
++  // V1.2 §11.1 — dipanggil sekali per file dalam loop generation file-by-file
++  @Post('upload-file')
++  @HttpCode(HttpStatus.OK)
++  uploadFile(@Body() dto: UploadFileDto) {
++    return this.webhooksService.handleUploadFile(dto);
++  }
++
++  // V1.2 §11.3 — dipanggil node "Validate <Nama>" setelah generation selesai
++  @Post('validate-stage')
++  @HttpCode(HttpStatus.OK)
++  validateStage(@Body() dto: ValidateStageDto) {
++    return this.webhooksService.handleValidateStage(dto);
++  }
+ }
+diff --git a/backend/src/webhooks/webhooks.module.ts b/backend/src/webhooks/webhooks.module.ts
+index 991260d..64e19cb 100644
+--- a/backend/src/webhooks/webhooks.module.ts
++++ b/backend/src/webhooks/webhooks.module.ts
+@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
+ import { WebhooksController } from './webhooks.controller';
+ import { WebhooksService } from './webhooks.service';
+ import { N8nWebhookGuard } from './n8n-webhook.guard';
++import { StorageModule } from '../storage/storage.module';
++import { GenerationModule } from '../generation/generation.module';
+ 
+ @Module({
++  imports: [StorageModule, GenerationModule],
+   controllers: [WebhooksController],
+   providers: [WebhooksService, N8nWebhookGuard],
+ })
+diff --git a/backend/src/webhooks/webhooks.service.ts b/backend/src/webhooks/webhooks.service.ts
+index 3a71547..8cc84a1 100644
+--- a/backend/src/webhooks/webhooks.service.ts
++++ b/backend/src/webhooks/webhooks.service.ts
+@@ -1,12 +1,20 @@
+-import { Injectable, NotFoundException } from '@nestjs/common';
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { ProjectStatus, StageStatus } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
++import { StorageService } from '../storage/storage.service';
++import { ValidationService } from '../generation/validation.service';
+ import { StageReadyDto } from './dto/stage-ready.dto';
+ import { WorkflowEventDto } from './dto/workflow-event.dto';
++import { UploadFileDto } from './dto/upload-file.dto';
++import { ValidateStageDto } from './dto/validate-stage.dto';
+ 
+ @Injectable()
+ export class WebhooksService {
+-  constructor(private readonly prisma: PrismaService) {}
++  constructor(
++    private readonly prisma: PrismaService,
++    private readonly storage: StorageService,
++    private readonly validation: ValidationService,
++  ) {}
+ 
+   async handleStageReady(dto: StageReadyDto) {
+     const project = await this.prisma.project.findUnique({ where: { id: dto.projectId } });
+@@ -44,4 +52,42 @@ export class WebhooksService {
+ 
+     return { ok: true };
+   }
++
++  /**
++   * V1.2 §11.1 — satu file dari loop file-by-file generation. Menulis ke S3
++   * (struktur users/{userId}/projects/{id}/artifacts/..., lihat StorageService)
++   * dan mencatat metadata-nya sebagai ArtifactObject.
++   */
++  async handleUploadFile(dto: UploadFileDto) {
++    const project = await this.prisma.project.findUnique({ where: { id: dto.projectId } });
++    if (!project) throw new NotFoundException('Project tidak ditemukan');
++    if (!project.createdById) {
++      throw new BadRequestException(
++        'Project ini belum punya createdById (dibuat sebelum V1.2) — tidak bisa tentukan folder S3.',
++      );
++    }
++
++    const stage = await this.prisma.artifactStage.findUnique({
++      where: { projectId_stageKey: { projectId: dto.projectId, stageKey: dto.stageKey } },
++    });
++    if (!stage) throw new NotFoundException('Stage tidak ditemukan');
++
++    const content = Buffer.from(dto.contentBase64, 'base64');
++
++    return this.storage.uploadArtifact({
++      artifactStageId: stage.id,
++      createdById: project.createdById,
++      projectId: project.id,
++      stageKey: dto.stageKey.toLowerCase(),
++      fileName: dto.fileName,
++      content,
++      mimeType: dto.mimeType || 'application/octet-stream',
++      version: dto.version ?? 1,
++    });
++  }
++
++  /** V1.2 §11.3 — dipanggil node "Validate <Nama>" setelah generation file-by-file selesai. */
++  handleValidateStage(dto: ValidateStageDto) {
++    return this.validation.validateStage(dto);
++  }
+ }
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 06c1bdd..40e3888 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -4,6 +4,12 @@ version: "3.8"
+ # — no db service defined here. Make sure DATABASE_URL in backend/.env points
+ # to it (Tailscale hostname, not a public IP), and that this host is allowed
+ # in Tailscale ACLs to reach the DB port.
++#
++# V1.2: adds a local MinIO service for S3-compatible object storage (§10 PRD
++# V1.2) — artifacts are stored as users/{userId}/projects/{projectId}/artifacts/...
++# See backend/src/storage/storage.service.ts. Swap for a real S3/R2/Wasabi
++# endpoint in production by changing STORAGE_ENDPOINT in backend/.env instead
++# of removing this service.
+ 
+ services:
+   backend:
+@@ -13,8 +19,15 @@ services:
+     restart: unless-stopped
+     env_file:
+       - ./backend/.env
++    # V1.2: needs a docker socket to spin up ephemeral sandbox containers
++    # for validation (§11.3 PRD V1.2) — npm install/tsc/build/psql never run
++    # in this container itself, only in throwaway ones it spawns.
++    volumes:
++      - /var/run/docker.sock:/var/run/docker.sock
+     ports:
+       - "127.0.0.1:6001:6001"   # bound to localhost — Apache reverse-proxies from here
++    depends_on:
++      - minio
+ 
+   frontend:
+     build:
+@@ -27,3 +40,21 @@ services:
+       - "127.0.0.1:6000:3000"   # bound to localhost — Apache reverse-proxies from here
+     depends_on:
+       - backend
++
++  # V1.2 — S3-compatible object storage (§10 PRD V1.2)
++  minio:
++    image: minio/minio
++    container_name: asf-minio
++    restart: unless-stopped
++    command: server /data --console-address ":9001"
++    environment:
++      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-asf_minio_admin}
++      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?set a real secret in .env}
++    volumes:
++      - minio-data:/data
++    ports:
++      - "127.0.0.1:9000:9000"   # S3 API
++      - "127.0.0.1:9001:9001"   # web console
++
++volumes:
++  minio-data:
+-- 
+2.43.0
+

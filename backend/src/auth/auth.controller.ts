@@ -36,7 +36,22 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   me(@Req() req: Request & { user: { userId: string; email: string } }) {
-    return req.user;
+    // V1.2: include the caller's primary organization so the frontend
+    // doesn't need a separate lookup / placeholder route to know which
+    // organization to scope Team/Member/Project screens to.
+    return this.authService.getMeWithOrganization(req.user.userId);
+  }
+
+  // BUGFIX (bahasa tidak konsisten): endpoint baru — sebelumnya tidak ada
+  // tempat menyimpan preferensi bahasa user sama sekali.
+  @Post('me/language')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  updateLanguage(
+    @Req() req: Request & { user: { userId: string } },
+    @Body() body: { lang: 'id' | 'en' },
+  ) {
+    return this.authService.updatePreferredLanguage(req.user.userId, body.lang);
   }
 
   // ===== V1.1: Google OAuth =====

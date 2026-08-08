@@ -9,6 +9,12 @@ const STATUS_STYLES: Record<string, { node: string; label: string }> = {
   PENDING: { node: 'border-panelBorder bg-panel text-inkMuted', label: 'text-inkMuted' },
 };
 
+// Note: stage.label comes from the backend (STAGE_LABELS in
+// backend/src/common/stage-order.ts) and is a set of professional role
+// titles ("Business Analyst — PRD", "QA Engineer", etc.) — these are kept
+// language-agnostic by design, same as job titles wouldn't normally be
+// translated. If that's not the intended behavior, STAGE_LABELS would need
+// to move into the i18n dictionaries and be looked up by lang server-side.
 export function StationRail({ stages, activeKey }: { stages: ProjectStage[]; activeKey?: string | null }) {
   return (
     <div className="w-full overflow-x-auto pb-2">

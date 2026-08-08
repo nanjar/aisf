@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
+import { useI18n } from '@/lib/i18n/I18nProvider';
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [businessIdea, setBusinessIdea] = useState('');
   const [knowledgeBaseId, setKnowledgeBaseId] = useState('');
@@ -27,7 +29,7 @@ export default function NewProjectPage() {
       });
       router.push(`/projects/${project.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Gagal membuat project.');
+      setError(err instanceof ApiError ? err.message : t('error.createProjectFailed'));
       setLoading(false);
     }
   }
@@ -35,41 +37,39 @@ export default function NewProjectPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">
       <Link href="/" className="font-display text-xs text-inkMuted hover:text-ink">
-        ← Kembali
+        {t('newProject.back')}
       </Link>
 
-      <h1 className="mt-4 text-2xl font-semibold text-ink">Project Baru</h1>
-      <p className="mt-1 text-sm text-inkMuted">
-        Idenya akan langsung dikirim ke pipeline n8n dan mulai digarap oleh Business Analyst Agent.
-      </p>
+      <h1 className="mt-4 text-2xl font-semibold text-ink">{t('newProject.heading')}</h1>
+      <p className="mt-1 text-sm text-inkMuted">{t('newProject.subheading')}</p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-5">
         <div>
-          <label className="mb-1 block text-sm text-inkMuted">Nama project</label>
+          <label className="mb-1 block text-sm text-inkMuted">{t('newProject.nameLabel')}</label>
           <input
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="mis. Platform Toko Buku Online"
+            placeholder={t('newProject.namePlaceholder')}
             className="w-full rounded-md border border-panelBorder bg-floor px-3 py-2 text-sm text-ink placeholder:text-inkMuted focus:border-track focus:outline-none"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-sm text-inkMuted">Business idea</label>
+          <label className="mb-1 block text-sm text-inkMuted">{t('newProject.ideaLabel')}</label>
           <textarea
             required
             rows={5}
             value={businessIdea}
             onChange={(e) => setBusinessIdea(e.target.value)}
-            placeholder="Jelaskan idenya selengkap mungkin — target pengguna, fitur utama, batasan..."
+            placeholder={t('newProject.ideaPlaceholder')}
             className="w-full rounded-md border border-panelBorder bg-floor px-3 py-2 text-sm text-ink placeholder:text-inkMuted focus:border-track focus:outline-none"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="mb-1 block text-sm text-inkMuted">Knowledge base ID (opsional)</label>
+            <label className="mb-1 block text-sm text-inkMuted">{t('newProject.kbLabel')}</label>
             <input
               value={knowledgeBaseId}
               onChange={(e) => setKnowledgeBaseId(e.target.value)}
@@ -78,7 +78,7 @@ export default function NewProjectPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-inkMuted">Model AI</label>
+            <label className="mb-1 block text-sm text-inkMuted">{t('newProject.modelLabel')}</label>
             <select
               value={aiModel}
               onChange={(e) => setAiModel(e.target.value)}
@@ -98,7 +98,7 @@ export default function NewProjectPage() {
           disabled={loading}
           className="w-full rounded-md bg-track px-4 py-2.5 text-sm font-medium text-floor transition hover:opacity-90 disabled:opacity-50"
         >
-          {loading ? 'Memulai pipeline…' : 'Mulai Pipeline'}
+          {loading ? t('newProject.submitLoading') : t('newProject.submitDefault')}
         </button>
       </form>
     </main>
