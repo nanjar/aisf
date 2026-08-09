@@ -75,6 +75,53 @@ enum ReminderType {
   OVERDUE
 }
 
+// V1.3 §29: nama provider LLM yang didukung LLMModule. Menambah provider baru
+// (mis. Qwen) = tambah value di sini + implementasikan LLMProvider interface,
+// TIDAK butuh migration lain di luar ini.
+enum LLMProviderName {
+  DEEPSEEK
+  OPENAI_COMPATIBLE
+  QWEN
+}
+
+// V1.3 §54 (project/job-level generation state)
+enum GenerationJobStatus {
+  PLANNED
+  RUNNING
+  VALIDATING
+  BUILDING
+  COMPLETED
+  FAILED
+}
+
+// V1.3 §54 (file-level generation state) — dipakai juga sebagai resultStatus
+// di RepairAttempt (§67 repair history mencatat status akhir repair).
+enum GenerationFileStatus {
+  PLANNED
+  GENERATING
+  GENERATED
+  VALIDATING
+  VALID
+  INVALID
+  REPAIRING
+  FAILED
+}
+
+// V1.3 §33: empat level validasi.
+enum ValidationLevel {
+  FILE
+  PROJECT
+  COMPILE
+  BUILD
+}
+
+// V1.3 §26/§27: status merge chunk untuk file besar.
+enum ChunkStatus {
+  PENDING
+  RECEIVED
+  MERGED
+}
+
 model User {
   id           String       @id @default(uuid())
   email        String       @unique
@@ -238,6 +285,7 @@ model ArtifactStage {
   revisions RevisionRequest[]
   artifacts ArtifactObject[]
   reminders ReminderLog[]
+  generationJobs GenerationJob[] // V1.3
 
   @@unique([projectId, stageKey])
   @@index([projectId])
@@ -304,6 +352,7 @@ model ArtifactObject {
   createdAt       DateTime @default(now()) @map("created_at")
 
   artifactStage ArtifactStage @relation(fields: [artifactStageId], references: [id], onDelete: Cascade)
+  generationFile GenerationFile? // V1.3 — set once this object is the persisted output of a GenerationFile
 
   @@index([artifactStageId])
   @@index([artifactStageId, fileName, version])
@@ -325,4 +374,145 @@ model ReminderLog {
 
   @@unique([artifactStageId, reminderType])
   @@map("reminder_logs")
+}
+
+// ---------------------------------------------------------------
+// V1.3 — Generation Engine data model (§69, §70 PRD V1.3)
+// Fase 1: model saja + LLMModule. Orkestrasi file-by-file generation yang
+// benar-benar mengisi tabel-tabel ini adalah Fase 3 (Manifest + engine).
+// ---------------------------------------------------------------
+
+model GenerationJob {
+  id              String   @id @default(uuid())
+  artifactStageId String   @map("artifact_stage_id")
+  artifactStage   ArtifactStage @relation(fields: [artifactStageId], references: [id], onDelete: Cascade)
+
+  provider      LLMProviderName @default(DEEPSEEK)
+  model         String
+  promptVersion String          @map("prompt_version") // §79, mis. "backend-file-generator-v1"
+
+  status      GenerationJobStatus @default(PLANNED)
+  attempt     Int                 @default(1)
+  maxAttempts Int                 @default(3) @map("max_attempts") // §36 — retry tidak boleh infinite
+
+  totalFiles     Int @default(0) @map("total_files")
+  generatedFiles Int @default(0) @map("generated_files")
+  missingFiles   Int @default(0) @map("missing_files")
+  invalidFiles   Int @default(0) @map("invalid_files")
+
+  // §78 — cost control / observability, BUKAN billing customer
+  inputTokens      Int      @default(0) @map("input_tokens")
+  outputTokens     Int      @default(0) @map("output_tokens")
+  totalTokens      Int      @default(0) @map("total_tokens")
+  estimatedCostUsd Decimal? @map("estimated_cost_usd") @db.Decimal(10, 4)
+
+  // §75 — kategori kegagalan: LLM_ERROR | LLM_TIMEOUT | OUTPUT_INCOMPLETE |
+  // FILE_VALIDATION_FAILED | PROJECT_VALIDATION_FAILED | COMPILE_FAILED |
+  // BUILD_FAILED | STORAGE_FAILED | MANIFEST_INCOMPLETE | RETRY_EXHAUSTED
+  errorCategory String? @map("error_category")
+  errorMessage  String? @map("error_message")
+
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  files             GenerationFile[]
+  validationResults ValidationResult[]
+
+  @@index([artifactStageId])
+  @@map("generation_jobs")
+}
+
+model GenerationFile {
+  id              String        @id @default(uuid())
+  generationJobId String        @map("generation_job_id")
+  generationJob   GenerationJob @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+
+  path        String // path relatif project root, mis. "src/main.ts"
+  status      GenerationFileStatus @default(PLANNED)
+  attempt     Int                  @default(1)
+  maxAttempts Int                  @default(3) @map("max_attempts")
+
+  // §25 dependency graph — daftar path file lain yang harus GENERATED lebih
+  // dulu. Disimpan sebagai path list dulu (bukan tabel edge terpisah) supaya
+  // Fase 1 tetap ringan; bisa dinormalisasi di fase generation engine kalau
+  // ternyata perlu query graph yang lebih kompleks.
+  dependsOnPaths String[] @map("depends_on_paths")
+
+  // Terisi begitu file GENERATED dan berhasil di-upload (lihat StorageService).
+  artifactObjectId String?         @unique @map("artifact_object_id")
+  artifactObject    ArtifactObject? @relation(fields: [artifactObjectId], references: [id])
+
+  checksum     String?
+  errorMessage String? @map("error_message")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  chunks            GenerationChunk[]
+  validationResults ValidationResult[]
+  repairAttempts    RepairAttempt[]
+
+  @@unique([generationJobId, path])
+  @@index([generationJobId])
+  @@map("generation_files")
+}
+
+model GenerationChunk {
+  id               String         @id @default(uuid())
+  generationFileId String         @map("generation_file_id")
+  generationFile   GenerationFile @relation(fields: [generationFileId], references: [id], onDelete: Cascade)
+
+  sequence    Int
+  totalChunks Int @map("total_chunks")
+
+  // Isi chunk mentah. Dibaca ulang saat merge (§26); tidak dihapus otomatis
+  // supaya §27 (deteksi chunk hilang/duplikat) bisa diaudit ulang kalau perlu.
+  content  String
+  checksum String
+  status   ChunkStatus @default(RECEIVED)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([generationFileId, sequence])
+  @@index([generationFileId])
+  @@map("generation_chunks")
+}
+
+model ValidationResult {
+  id              String        @id @default(uuid())
+  generationJobId String        @map("generation_job_id")
+  generationJob   GenerationJob @relation(fields: [generationJobId], references: [id], onDelete: Cascade)
+
+  // Null untuk level PROJECT/COMPILE/BUILD (berlaku ke seluruh job, bukan 1 file).
+  generationFileId String?         @map("generation_file_id")
+  generationFile    GenerationFile? @relation(fields: [generationFileId], references: [id], onDelete: Cascade)
+
+  level      ValidationLevel
+  passed     Boolean
+  errors     Json? // list error terstruktur; null kalau passed
+  durationMs Int?  @map("duration_ms")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([generationJobId])
+  @@index([generationFileId])
+  @@map("validation_results")
+}
+
+model RepairAttempt {
+  id                  String         @id @default(uuid())
+  generationFileId    String         @map("generation_file_id")
+  generationFile      GenerationFile @relation(fields: [generationFileId], references: [id], onDelete: Cascade)
+
+  attemptNumber       Int    @map("attempt_number")
+  errorSummary        String @map("error_summary")
+  repairPromptVersion String @map("repair_prompt_version") // §79, mis. "backend-repair-v1"
+  resultStatus        GenerationFileStatus @map("result_status")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([generationFileId])
+  @@map("repair_attempts")
 }

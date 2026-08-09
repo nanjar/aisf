@@ -13,6 +13,7 @@ import { I18nModule } from './i18n/i18n.module';
 import { TeamsModule } from './organizations/teams/teams.module';
 import { MembersModule } from './organizations/members/members.module';
 import { InvitationsModule } from './invitations/invitations.module';
+import { LLMModule } from './llm/llm.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { InvitationsModule } from './invitations/invitations.module';
     TeamsModule, // V1.2
     MembersModule, // V1.2
     InvitationsModule, // V1.2
+    LLMModule, // V1.3
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
