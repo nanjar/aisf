@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs
 import { N8nWebhookGuard } from '../webhooks/n8n-webhook.guard';
 import { UiuxService } from './uiux.service';
 import { GenerateUiuxDto } from './dto/generate-uiux.dto';
+import { UiuxContentDto } from './dto/uiux-content.dto';
 
 /**
  * §81 n8n flow — UI/UX Designer node di workflow n8n memanggil endpoint ini
@@ -18,5 +19,15 @@ export class UiuxController {
   @HttpCode(HttpStatus.OK)
   generate(@Body() dto: GenerateUiuxDto) {
     return this.uiuxService.generate(dto);
+  }
+
+  /**
+   * Dipanggil node "Fetch UIUX Design Spec" TEPAT SEBELUM Frontend Developer
+   * Agent di n8n — lihat komentar di UiuxService.getContentForFrontend().
+   */
+  @Post('uiux/content')
+  @HttpCode(HttpStatus.OK)
+  getContent(@Body() dto: UiuxContentDto) {
+    return this.uiuxService.getContentForFrontend(dto.projectId);
   }
 }

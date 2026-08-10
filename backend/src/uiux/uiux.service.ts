@@ -289,4 +289,62 @@ export class UiuxService {
       'uiux/components.yaml, uiux/design-system.yaml, uiux/navigation.yaml, uiux/accessibility.md',
     ].join('\n');
   }
+
+  /**
+   * §Fix (gap ditemukan setelah Fase 2 live): Frontend Developer Agent di n8n
+   * SEBELUMNYA tidak pernah membaca output UI/UX Designer — jadi 7 file yang
+   * sudah di-approve manusia tidak dipakai sama sekali oleh stage berikutnya,
+   * bertentangan dengan tujuan sistem ini (manusia cuma approve, bukan
+   * menerjemahkan manual). Method ini menggabungkan 7 file jadi satu teks yang
+   * dipanggil n8n TEPAT SEBELUM Frontend Developer Agent (bukan di-attach ke
+   * payload utama yang mengalir ke semua node lain) supaya tidak menambah
+   * ukuran payload di node-node lain yang tidak butuh — sudah pernah ada
+   * insiden 413 request entity too large gara-gara payload menggelembung
+   * (lihat komentar di Package Builder code node).
+   */
+  async getContentForFrontend(projectId: string): Promise<{ combined: string; fileCount: number }> {
+    const uiuxStage = await this.prisma.artifactStage.findFirst({
+      where: { projectId, stageKey: StageKey.UIUX },
+    });
+    if (!uiuxStage) {
+      throw new NotFoundException('Stage UIUX tidak ditemukan untuk project ini');
+    }
+
+    const latestJob = await this.prisma.generationJob.findFirst({
+      where: { artifactStageId: uiuxStage.id, status: GenerationJobStatus.COMPLETED },
+      orderBy: { completedAt: 'desc' },
+    });
+    if (!latestJob) {
+      throw new ConflictException('Belum ada UI/UX Design Specification yang berhasil di-generate untuk project ini');
+    }
+
+    const files = await this.prisma.generationFile.findMany({
+      where: { generationJobId: latestJob.id, artifactObjectId: { not: null } },
+      include: { artifactObject: true },
+      orderBy: { path: 'asc' },
+    });
+
+    const sections: string[] = [];
+    for (const file of files) {
+      if (!file.artifactObject) continue;
+      const stream = await this.storage.getObjectStream(file.artifactObject.bucket, file.artifactObject.objectKey);
+      const content = await this.streamToString(stream);
+      const fileName = file.path.replace(/^uiux\//, '');
+      sections.push(`### ${fileName}\n\n${content}`);
+    }
+
+    return {
+      combined: sections.join('\n\n---\n\n'),
+      fileCount: sections.length,
+    };
+  }
+
+  private streamToString(stream: any): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    });
+  }
 }
