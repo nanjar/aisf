@@ -14,6 +14,7 @@ import { TeamsModule } from './organizations/teams/teams.module';
 import { MembersModule } from './organizations/members/members.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { LLMModule } from './llm/llm.module';
+import { UiuxModule } from './uiux/uiux.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { LLMModule } from './llm/llm.module';
     MembersModule, // V1.2
     InvitationsModule, // V1.2
     LLMModule, // V1.3
+    UiuxModule, // V1.3 Fase 2
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as archiver from 'archiver';
 import { PassThrough } from 'stream';
-import { OrgRole, ProjectStatus, StageStatus } from '@prisma/client';
+import { OrgRole, ProjectStatus, StageKey, StageStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { STAGE_LABELS, STAGE_ORDER } from '../common/stage-order';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { SetProjectDeadlineDto } from './dto/set-deadline.dto';
@@ -25,6 +26,7 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
 
   async create(dto: CreateProjectDto, createdById: string) {
@@ -174,10 +176,35 @@ export class ProjectsService {
     archive.pipe(output);
 
     for (const stageKey of STAGE_ORDER) {
+      // V1.3 — UIUX punya 7 file asli di S3 (lihat blok khusus di bawah), bukan
+      // satu blob content seperti stage lain. stage.content di sini cuma ringkasan.
+      if (stageKey === StageKey.UIUX) continue;
       const stage = project.stages.find((s) => s.stageKey === stageKey);
       if (!stage?.content) continue;
       const fileName = ARTIFACT_FILE_NAMES[stageKey] ?? `${stageKey.toLowerCase()}.txt`;
       archive.append(stage.content, { name: fileName });
+    }
+
+    // V1.3 §11 — sertakan 7 file UI/UX Design Specification asli dari S3, bukan ringkasan.
+    const uiuxStage = project.stages.find((s) => s.stageKey === StageKey.UIUX);
+    if (uiuxStage) {
+      const generationFiles = await this.prisma.generationFile.findMany({
+        where: {
+          generationJob: { artifactStageId: uiuxStage.id },
+          artifactObjectId: { not: null },
+        },
+        include: { artifactObject: true },
+        orderBy: { path: 'asc' },
+      });
+      for (const gf of generationFiles) {
+        if (!gf.artifactObject) continue;
+        try {
+          const stream = await this.storage.getObjectStream(gf.artifactObject.bucket, gf.artifactObject.objectKey);
+          archive.append(stream as any, { name: gf.path }); // path sudah "uiux/xxx.yaml"
+        } catch (err) {
+          // Best-effort — satu file gagal diunduh dari S3 tidak boleh menggagalkan seluruh zip.
+        }
+      }
     }
 
     archive.append(
