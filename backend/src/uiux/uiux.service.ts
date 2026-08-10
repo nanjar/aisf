@@ -14,8 +14,15 @@ import { StorageService } from '../storage/storage.service';
 import { LLMService } from '../llm/llm.service';
 import { LLMProviderError } from '../llm/types';
 import { GenerateUiuxDto } from './dto/generate-uiux.dto';
-import { UIUX_PROMPT_VERSION, UIUX_SYSTEM_PROMPT, buildUiuxUserPrompt } from './prompts';
-import { validateFileSet, validateSingleFile } from './validation';
+import { UIUX_PROMPT_VERSION, UIUX_FILE_PROMPTS, buildUiuxUserPrompt } from './prompts';
+import { validateSingleFile } from './validation';
+
+/** Safety net kalau LLM tetap membungkus output dalam code fence walau sudah dilarang di prompt. */
+function stripCodeFence(content: string): string {
+  const trimmed = content.trim();
+  const fenceMatch = trimmed.match(/^```[a-zA-Z]*\n([\s\S]*?)\n?```$/);
+  return fenceMatch ? fenceMatch[1].trim() : trimmed;
+}
 
 const REQUIRED_FILES = [
   'design-spec.yaml',
@@ -101,53 +108,48 @@ export class UiuxService {
     });
 
     try {
-      const response = await this.llm.generate({
-        systemPrompt: UIUX_SYSTEM_PROMPT,
-        userPrompt: buildUiuxUserPrompt({
-          projectName: project.name,
-          businessIdea: project.businessIdea,
-          prdContent: prdStage.content,
-          architectureContent: archStage.content,
-        }),
-        promptVersion: UIUX_PROMPT_VERSION,
-        maxTokens: 16000,
+      const userPrompt = buildUiuxUserPrompt({
+        projectName: project.name,
+        businessIdea: project.businessIdea,
+        prdContent: prdStage.content,
+        architectureContent: archStage.content,
       });
+
+      // v2 — 1 panggilan LLM per file (bukan 1 JSON gabungan raksasa, lihat
+      // uiux-designer-v1 postmortem: DeepSeek sering memotong output di
+      // tengah JSON besar). Sequential, bukan paralel — lebih gampang
+      // didiagnosis kalau ada yang gagal, dan menghindari rate limit burst.
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalTokens = 0;
+      let lastModel = 'deepseek-chat';
+      const results: { fileName: string; content: string; outcome: ReturnType<typeof validateSingleFile> }[] = [];
+
+      for (const filePrompt of UIUX_FILE_PROMPTS) {
+        const response = await this.llm.generate({
+          systemPrompt: filePrompt.systemPrompt,
+          userPrompt,
+          promptVersion: UIUX_PROMPT_VERSION,
+          maxTokens: 8000,
+        });
+
+        totalInputTokens += response.inputTokens;
+        totalOutputTokens += response.outputTokens;
+        totalTokens += response.totalTokens;
+        lastModel = response.model;
+
+        const content = stripCodeFence(response.content);
+        results.push({ fileName: filePrompt.fileName, content, outcome: validateSingleFile(filePrompt.fileName, content) });
+      }
 
       await this.prisma.generationJob.update({
         where: { id: job.id },
         data: {
-          model: response.model,
-          inputTokens: response.inputTokens,
-          outputTokens: response.outputTokens,
-          totalTokens: response.totalTokens,
+          model: lastModel,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          totalTokens,
         },
-      });
-
-      let filesRaw: Record<string, unknown>;
-      try {
-        filesRaw = JSON.parse(response.content);
-      } catch {
-        return await this.failJob(
-          uiuxStage.id,
-          job.id,
-          'OUTPUT_INCOMPLETE',
-          'Respons LLM bukan JSON valid — kemungkinan output terpotong atau format salah.',
-        );
-      }
-
-      const fileSetErrors = validateFileSet(filesRaw);
-      if (fileSetErrors.length > 0) {
-        return await this.failJob(
-          uiuxStage.id,
-          job.id,
-          'FILE_VALIDATION_FAILED',
-          `Struktur 7-file tidak sesuai: ${fileSetErrors.join('; ')}`,
-        );
-      }
-
-      const results = REQUIRED_FILES.map((fileName) => {
-        const content = String(filesRaw[fileName] ?? '');
-        return { fileName, content, outcome: validateSingleFile(fileName, content) };
       });
 
       // Catat semua file + hasil validasi dulu untuk audit, terlepas dari lolos/tidak (§18 audit).
@@ -205,7 +207,7 @@ export class UiuxService {
         });
       }
 
-      const summary = this.buildSummary(filesRaw);
+      const summary = this.buildSummary(results);
 
       const updatedStage = await this.prisma.artifactStage.update({
         where: { id: uiuxStage.id },
@@ -262,12 +264,12 @@ export class UiuxService {
   }
 
   /** Ringkasan singkat buat ArtifactStage.content — detail lengkap ada di 7 file S3 + GenerationFile. */
-  private buildSummary(filesRaw: Record<string, unknown>): string {
+  private buildSummary(results: { fileName: string; content: string }[]): string {
     let screenCount = 0;
     let componentCount = 0;
     try {
-      const designSpec = filesRaw['design-spec.yaml'];
-      const parsed = yaml.load(String(designSpec)) as Record<string, unknown>;
+      const designSpec = results.find((r) => r.fileName === 'design-spec.yaml');
+      const parsed = yaml.load(designSpec?.content ?? '') as Record<string, unknown>;
       screenCount = Array.isArray(parsed?.screens) ? parsed.screens.length : 0;
       componentCount = Array.isArray(parsed?.components) ? parsed.components.length : 0;
     } catch {
