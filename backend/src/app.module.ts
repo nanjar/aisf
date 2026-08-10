@@ -15,6 +15,7 @@ import { MembersModule } from './organizations/members/members.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { LLMModule } from './llm/llm.module';
 import { UiuxModule } from './uiux/uiux.module';
+import { BackendGenModule } from './backend-gen/backend-gen.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { UiuxModule } from './uiux/uiux.module';
     InvitationsModule, // V1.2
     LLMModule, // V1.3
     UiuxModule, // V1.3 Fase 2
+    BackendGenModule, // V1.3 Fase 3 — Backend file-by-file generation
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

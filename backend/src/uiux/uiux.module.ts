@@ -8,5 +8,6 @@ import { LLMModule } from '../llm/llm.module';
   imports: [StorageModule, LLMModule],
   controllers: [UiuxController],
   providers: [UiuxService],
+  exports: [UiuxService], // V1.3 — dipakai backend-gen (dan nanti frontend-gen) buat ambil UI/UX spec
 })
 export class UiuxModule {}
