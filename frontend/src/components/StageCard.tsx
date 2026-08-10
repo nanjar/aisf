@@ -34,10 +34,8 @@ export function StageCard({
   const [loadingS3, setLoadingS3] = useState(false);
   const [s3Error, setS3Error] = useState<string | null>(null);
 
-  const badgeText =
-    stage.status === 'GENERATED' && stage.stageKey === 'QA'
-      ? t('projectDetail.qaGeneratedDone')
-      : t(`stageStatus.${stage.status}`);
+  // Fix: QA sekarang punya approval gate juga, tidak lagi dikecualikan.
+  const badgeText = t(`stageStatus.${stage.status}`);
 
   const canRequestRevision = comment.trim().length > 0;
   const stageDeadline = formatDate(stage.deadlineAt);
@@ -128,7 +126,7 @@ export function StageCard({
             </p>
           )}
 
-          {stage.status === 'GENERATED' && stage.stageKey !== 'QA' && (
+          {stage.status === 'GENERATED' && (
             <div className="mt-4 space-y-3">
               <textarea
                 value={comment}
@@ -165,11 +163,6 @@ export function StageCard({
             </div>
           )}
 
-          {stage.status === 'GENERATED' && stage.stageKey === 'QA' && (
-            <p className="mt-4 font-display text-xs text-inkMuted">
-              {t('projectDetail.qaNoApprovalNeeded')}
-            </p>
-          )}
         </div>
       )}
     </div>

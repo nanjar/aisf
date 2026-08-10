@@ -4,8 +4,8 @@ import { StageKey } from '@prisma/client';
  * Fixed pipeline order, matching the n8n "AI Software Factory" workflow:
  * PRD -> Architecture -> UI/UX Design -> Estimation -> Database -> Backend
  * -> Frontend -> QA -> Package (V1.3 §8 — UI/UX Designer inserted as stage 3).
- * QA has no human approval gate (workflow continues automatically to Package Builder).
- * Package Builder DOES have an approval gate — workflow only completes after it.
+ * Every stage including QA now has a human approval gate (see
+ * STAGES_WITHOUT_APPROVAL below — kept empty on purpose for symmetry).
  */
 export const STAGE_ORDER: StageKey[] = [
   StageKey.PRD,
@@ -19,7 +19,14 @@ export const STAGE_ORDER: StageKey[] = [
   StageKey.PACKAGE,
 ];
 
-export const STAGES_WITHOUT_APPROVAL: StageKey[] = [StageKey.QA];
+/**
+ * Fix: QA sekarang punya approval gate juga (STAGES_WITHOUT_APPROVAL kosong).
+ * Semula QA dikecualikan by design (auto-proceed ke Package Builder tanpa
+ * approval manusia) — diubah atas permintaan user karena terasa janggal di
+ * UI (QA "Generation complete" dan Package Builder "Awaiting decision"
+ * muncul bersamaan tanpa jeda approval QA yang jelas).
+ */
+export const STAGES_WITHOUT_APPROVAL: StageKey[] = [];
 
 export const STAGE_LABELS: Record<StageKey, string> = {
   PRD: 'Business Analyst — PRD',
