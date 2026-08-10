@@ -94,10 +94,15 @@
     "noS3File": "No file stored in S3 for this stage yet."
   },
   "stageStatus": {
-    "APPROVED": "Approved",
+    "PENDING": "Not started",
+    "GENERATING": "Generating",
+    "VALIDATING": "Validating",
+    "SELF_HEALING": "Self-healing",
     "GENERATED": "Awaiting decision",
+    "REVISION_REQUESTED": "Revision requested",
+    "APPROVED": "Approved",
     "REJECTED": "Rejected",
-    "PENDING": "Not started"
+    "ARCHIVED": "Archived"
   },
   "team": {
     "heading": "Team",
