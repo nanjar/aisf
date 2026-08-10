@@ -17,11 +17,15 @@ import { GenerateUiuxDto } from './dto/generate-uiux.dto';
 import { UIUX_PROMPT_VERSION, UIUX_FILE_PROMPTS, buildUiuxUserPrompt } from './prompts';
 import { validateSingleFile } from './validation';
 
-/** Safety net kalau LLM tetap membungkus output dalam code fence walau sudah dilarang di prompt. */
+/** Safety net kalau LLM tetap membungkus output dalam code fence walau sudah dilarang di prompt.
+ * Dipecah jadi 2 replace independen (bukan 1 regex end-to-end) supaya tetap robust walau closing
+ * fence tidak persis di akhir string (trailing whitespace/newline ekstra, dsb — kasus nyata yang
+ * bikin regex versi awal gagal match dan fence ```yaml lolos mentah-mentah ke parser YAML). */
 function stripCodeFence(content: string): string {
-  const trimmed = content.trim();
-  const fenceMatch = trimmed.match(/^```[a-zA-Z]*\n([\s\S]*?)\n?```$/);
-  return fenceMatch ? fenceMatch[1].trim() : trimmed;
+  let text = content.trim();
+  text = text.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
+  text = text.replace(/\r?\n?```\s*$/, '');
+  return text.trim();
 }
 
 const REQUIRED_FILES = [
@@ -130,7 +134,7 @@ export class UiuxService {
           systemPrompt: filePrompt.systemPrompt,
           userPrompt,
           promptVersion: UIUX_PROMPT_VERSION,
-          maxTokens: 8000,
+          maxTokens: 8192,
         });
 
         totalInputTokens += response.inputTokens;

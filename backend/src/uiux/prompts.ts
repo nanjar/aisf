@@ -1,4 +1,4 @@
-export const UIUX_PROMPT_VERSION = 'uiux-designer-v2'; // v2: 1 file per call, bukan 1 JSON gabungan (lihat v1 postmortem)
+export const UIUX_PROMPT_VERSION = 'uiux-designer-v3'; // v2->v3: fix stripCodeFence + kendalikan panjang screens/components
 
 const SHARED_ROLE = `Anda adalah AI UI/UX Designer di dalam AI Software Factory. Tugas Anda:
 mengubah PRD dan Architecture yang sudah disetujui menjadi UI/UX Design
@@ -48,6 +48,12 @@ field: id, name, route, purpose, userRoles, layout, components, states
 (minimal: loading, empty, error, success, disabled, permission-denied),
 responsive, actions.
 
+PENTING soal panjang output: cakup SEMUA screen yang benar-benar dibutuhkan
+sesuai PRD, tapi jaga tiap field TETAP RINGKAS (mis. "components" cukup daftar
+nama, "actions" cukup daftar singkat) — tujuannya supaya SELURUH daftar screen
+selesai dalam satu response, bukan kepotong di tengah karena satu screen
+ditulis terlalu detail.
+
 ${OUTPUT_RULES_YAML}`,
   },
   {
@@ -68,6 +74,13 @@ ${OUTPUT_RULES_YAML}`,
 File yang diminta: components.yaml — spesifikasi SETIAP reusable component
 (top-level key "components" berisi list). Setiap component WAJIB punya: id,
 name, purpose, props, states, variants, responsive, accessibility.
+
+PENTING soal panjang output: fokus ke reusable component yang BENAR-BENAR
+dipakai lintas screen (biasanya 10-20 component untuk aplikasi menengah,
+JANGAN membuat entri untuk setiap variasi kecil sebagai component terpisah).
+Jaga tiap field TETAP RINGKAS (mis. "props" cukup nama+tipe singkat) supaya
+SELURUH daftar component selesai dalam satu response, bukan kepotong di
+tengah karena satu component ditulis terlalu detail atau daftarnya kepanjangan.
 
 ${OUTPUT_RULES_YAML}`,
   },
