@@ -236,18 +236,21 @@ export class BackendGenService {
         } else {
           invalidCount++;
         }
+
+        // Fix bug (report user): progress bar/estimasi durasi di StageCard poll
+        // GenerationJob.generatedFiles tiap 5 detik — sebelumnya field ini cuma
+        // di-update SEKALI di akhir loop, jadi UI selalu baca 0 selama proses
+        // jalan dan "lompat" ke angka final pas loop selesai. Update di SETIAP
+        // iterasi supaya progress bar benar-benar bergerak real-time.
+        await this.prisma.generationJob.update({
+          where: { id: job.id },
+          data: { model: lastModel, generatedFiles: generatedCount, invalidFiles: invalidCount },
+        });
       }
 
       await this.prisma.generationJob.update({
         where: { id: job.id },
-        data: {
-          model: lastModel,
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          totalTokens,
-          generatedFiles: generatedCount,
-          invalidFiles: invalidCount,
-        },
+        data: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, totalTokens },
       });
 
       if (invalidCount > 0) {

@@ -144,6 +144,14 @@ export class UiuxService {
 
         const content = stripCodeFence(response.content);
         results.push({ fileName: filePrompt.fileName, content, outcome: validateSingleFile(filePrompt.fileName, content) });
+
+        // Fix bug (sama seperti backend-gen.service.ts): update generatedFiles
+        // per iterasi, bukan cuma di akhir — supaya progress bar StageCard
+        // beneran bergerak, bukan lompat dari 0 ke 7 pas selesai semua.
+        await this.prisma.generationJob.update({
+          where: { id: job.id },
+          data: { generatedFiles: results.length },
+        });
       }
 
       await this.prisma.generationJob.update({
