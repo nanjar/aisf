@@ -129,6 +129,16 @@ export interface StageProgress {
   maxAttempts?: number;
 }
 
+// §Version History — lihat StagesController.listVersions()
+export interface StageVersion {
+  version: number;
+  createdAt: string;
+  files: { id: string; fileName: string; size: number }[];
+  isCurrent: boolean;
+  canRollback: boolean;
+  revisionComment: string | null;
+}
+
 export type OrgRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 export type MemberStatus = 'INVITED' | 'ACTIVE' | 'DEACTIVATED';
 
@@ -227,6 +237,19 @@ export const api = {
   // kalau tidak ada GenerationJob yang lagi jalan untuk stage ini.
   getStageProgress: (projectId: string, stageKey: StageKey) =>
     request<StageProgress>(`/projects/${projectId}/stages/${stageKey}/progress`),
+
+  // §Version History — daftar semua version, dan isi teks satu version tertentu.
+  listStageVersions: (projectId: string, stageKey: StageKey) =>
+    request<StageVersion[]>(`/projects/${projectId}/stages/${stageKey}/versions`),
+  getStageVersionContent: (projectId: string, stageKey: StageKey, version: number) =>
+    request<{ version: number; files: { fileName: string; content: string }[] }>(
+      `/projects/${projectId}/stages/${stageKey}/versions/${version}/content`,
+    ),
+  rollbackStage: (projectId: string, stageKey: StageKey, version: number) =>
+    request<ProjectStage>(`/projects/${projectId}/stages/${stageKey}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    }),
 
   listMembers: (orgId: string) => request<OrganizationMember[]>(`/organizations/${orgId}/members`),
   inviteMember: (orgId: string, email: string, role: OrgRole) =>

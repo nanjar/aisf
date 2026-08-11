@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, ApiError, type ProjectStage, type StageProgress } from '@/lib/api';
+import { api, ApiError, type ProjectStage, type StageProgress, type StageVersion } from '@/lib/api';
 import { useI18n } from '@/lib/i18n/I18nProvider';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -53,6 +53,13 @@ export function StageCard({
   const [loadingS3, setLoadingS3] = useState(false);
   const [s3Error, setS3Error] = useState<string | null>(null);
   const [progress, setProgress] = useState<StageProgress | null>(null);
+  const [showVersions, setShowVersions] = useState(false);
+  const [versions, setVersions] = useState<StageVersion[] | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [versionsError, setVersionsError] = useState<string | null>(null);
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null);
+  const [previewFiles, setPreviewFiles] = useState<{ fileName: string; content: string }[] | null>(null);
+  const [rollingBackVersion, setRollingBackVersion] = useState<number | null>(null);
 
   // Fix: QA sekarang punya approval gate juga, tidak lagi dikecualikan.
   const badgeText = t(`stageStatus.${stage.status}`);
@@ -100,6 +107,57 @@ export function StageCard({
       setS3Error(err instanceof ApiError ? err.message : t('error.serverError'));
     } finally {
       setLoadingS3(false);
+    }
+  }
+
+  async function handleToggleVersions() {
+    const next = !showVersions;
+    setShowVersions(next);
+    setPreviewVersion(null);
+    setPreviewFiles(null);
+    if (next && !versions) {
+      setLoadingVersions(true);
+      setVersionsError(null);
+      try {
+        const result = await api.listStageVersions(projectId, stage.stageKey);
+        setVersions(result);
+      } catch (err) {
+        setVersionsError(err instanceof ApiError ? err.message : t('error.serverError'));
+      } finally {
+        setLoadingVersions(false);
+      }
+    }
+  }
+
+  async function handlePreviewVersion(version: number) {
+    if (previewVersion === version) {
+      setPreviewVersion(null);
+      setPreviewFiles(null);
+      return;
+    }
+    setPreviewVersion(version);
+    setPreviewFiles(null);
+    try {
+      const result = await api.getStageVersionContent(projectId, stage.stageKey, version);
+      setPreviewFiles(result.files);
+    } catch (err) {
+      setVersionsError(err instanceof ApiError ? err.message : t('error.serverError'));
+    }
+  }
+
+  async function handleRollback(version: number) {
+    if (!window.confirm(`Rollback ke version ${version}? Ini akan membuat version baru berisi konten lama, riwayat tidak hilang.`)) {
+      return;
+    }
+    setRollingBackVersion(version);
+    setVersionsError(null);
+    try {
+      await api.rollbackStage(projectId, stage.stageKey, version);
+      setVersions(null); // paksa reload daftar version
+      window.location.reload(); // paling simpel supaya stage.content di parent ikut ter-refresh
+    } catch (err) {
+      setVersionsError(err instanceof ApiError ? err.message : t('error.serverError'));
+      setRollingBackVersion(null);
     }
   }
 
@@ -151,7 +209,93 @@ export function StageCard({
             >
               {loadingS3 ? '…' : t('projectDetail.viewFromS3')}
             </button>
+            <button
+              onClick={handleToggleVersions}
+              className="rounded-md border border-panelBorder px-3 py-1.5 font-display text-[11px] text-inkMuted transition hover:border-track/50 hover:text-ink"
+            >
+              {showVersions ? 'Tutup Riwayat Versi' : 'Riwayat Versi'}
+            </button>
           </div>
+
+          {versionsError && <p className="mb-3 text-xs text-stop">{versionsError}</p>}
+
+          {showVersions && (
+            <div className="mb-4 rounded-md border border-panelBorder bg-floor p-3">
+              {loadingVersions && <p className="font-display text-xs text-inkMuted">Memuat riwayat versi…</p>}
+              {versions && versions.length === 0 && (
+                <p className="font-display text-xs text-inkMuted">Belum ada versi tersimpan.</p>
+              )}
+              {versions && versions.length > 0 && (
+                <ul className="space-y-2">
+                  {versions.map((v) => (
+                    <li key={v.version} className="rounded-md border border-panelBorder bg-panel px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-display text-xs text-ink">
+                            Version {v.version}
+                            {v.isCurrent && (
+                              <span className="ml-2 rounded-full border border-go/30 bg-go/15 px-2 py-0.5 text-[10px] text-go">
+                                Saat ini
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-display text-[11px] text-inkMuted">
+                            {new Date(v.createdAt).toLocaleString(undefined, {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handlePreviewVersion(v.version)}
+                            className="rounded-md border border-panelBorder px-2.5 py-1 font-display text-[11px] text-inkMuted transition hover:border-track/50 hover:text-ink"
+                          >
+                            {previewVersion === v.version ? 'Sembunyikan' : 'Lihat isi'}
+                          </button>
+                          {v.canRollback && (
+                            <button
+                              onClick={() => handleRollback(v.version)}
+                              disabled={rollingBackVersion !== null}
+                              className="rounded-md border border-signal/30 bg-signal/10 px-2.5 py-1 font-display text-[11px] text-signal transition hover:bg-signal/20 disabled:opacity-50"
+                            >
+                              {rollingBackVersion === v.version ? 'Rollback…' : 'Rollback ke sini'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {v.revisionComment && (
+                        <p className="mt-1.5 font-display text-[11px] text-inkMuted">
+                          Alasan revisi: {v.revisionComment}
+                        </p>
+                      )}
+                      {previewVersion === v.version && (
+                        <div className="mt-2 space-y-2">
+                          {previewFiles === null ? (
+                            <p className="font-display text-[11px] text-inkMuted">Memuat isi…</p>
+                          ) : (
+                            previewFiles.map((f) => (
+                              <div key={f.fileName}>
+                                {previewFiles.length > 1 && (
+                                  <p className="mb-1 font-display text-[11px] text-inkMuted">{f.fileName}</p>
+                                )}
+                                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-floor p-3 font-display text-[11px] leading-relaxed text-inkMuted">
+                                  {f.content}
+                                </pre>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {s3Error && <p className="mb-3 text-xs text-stop">{s3Error}</p>}
 

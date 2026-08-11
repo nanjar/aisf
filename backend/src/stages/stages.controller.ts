@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { StageKey } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/rbac/roles.guard';
 import { Roles } from '../common/rbac/roles.decorator';
 import { OrgRole } from '@prisma/client';
 import { DecideStageDto, AssignStageDto, SetDeadlineDto } from './dto/decide-stage.dto';
+import { RollbackStageDto } from './dto/rollback-stage.dto';
 import { StagesService } from './stages.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -63,6 +64,33 @@ export class StagesController {
     const file = await this.prisma.artifactObject.findUniqueOrThrow({ where: { id: fileId } });
     const url = await this.storage.getPresignedDownloadUrl(file.bucket, file.objectKey);
     return { url, expiresInSeconds: 900 };
+  }
+
+  // §Version History — daftar semua version yang pernah ter-generate untuk stage ini.
+  @Get(':stageKey/versions')
+  listVersions(@Param('projectId', ParseUUIDPipe) projectId: string, @Param('stageKey') stageKey: StageKey) {
+    return this.stagesService.listVersions(projectId, stageKey);
+  }
+
+  // Isi teks satu version tertentu — dipakai UI buat lihat/bandingkan versi lama vs sekarang.
+  @Get(':stageKey/versions/:version/content')
+  getVersionContent(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('stageKey') stageKey: StageKey,
+    @Param('version', ParseIntPipe) version: number,
+  ) {
+    return this.stagesService.getVersionContent(projectId, stageKey, version);
+  }
+
+  // Restore isi version lama sebagai version BARU (history tetap utuh, forward-only).
+  @Post(':stageKey/rollback')
+  rollback(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('stageKey') stageKey: StageKey,
+    @Body() dto: RollbackStageDto,
+    @Req() req: Request & { user: { email: string } },
+  ) {
+    return this.stagesService.rollback(projectId, stageKey, dto.version, req.user.email);
   }
 
   /**
