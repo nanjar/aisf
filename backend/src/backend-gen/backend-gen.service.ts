@@ -19,7 +19,7 @@ import {
   buildRepairSystemPrompt,
   buildRepairUserPrompt,
 } from './prompts';
-import { ManifestFileEntry, parseManifest, validateFileContent } from './validation';
+import { ManifestFileEntry, parseManifest, reorderByDependencies, validateFileContent } from './validation';
 
 const MAX_ATTEMPTS = 3; // §36 — retry (regenerate dari nol) per stage
 const MAX_HEALING_ROUNDS = 3; // selaras dengan MAX_SELF_HEALING_ATTEMPTS di ValidationService
@@ -140,14 +140,14 @@ export class BackendGenService {
           revisionNote: dto.decision === 'revision' ? dto.note : undefined,
         }),
         promptVersion: BACKEND_MANIFEST_PROMPT_VERSION,
-        maxTokens: 8192,
+        maxTokens: 16384, // manifest bisa panjang untuk project besar — naikkan dari default 8192 (lihat postmortem v1)
       });
       totalInputTokens += manifestResponse.inputTokens;
       totalOutputTokens += manifestResponse.outputTokens;
       totalTokens += manifestResponse.totalTokens;
       lastModel = manifestResponse.model;
 
-      const { entries, errors: manifestErrors } = parseManifest(stripCodeFence(manifestResponse.content));
+      const { entries: manifestEntries, errors: manifestErrors } = parseManifest(stripCodeFence(manifestResponse.content));
       if (manifestErrors.length > 0) {
         return await this.failJob(
           backendStage.id,
@@ -156,6 +156,10 @@ export class BackendGenService {
           manifestErrors.join('; '),
         );
       }
+      // Urutan array manifest dari LLM cuma dioptimalkan supaya file wajib
+      // aman dari truncation (lihat prompts.ts) — urutan GENERATE yang benar
+      // (dependency-safe) dihitung ulang di sini dari "dependsOn".
+      const entries = reorderByDependencies(manifestEntries);
 
       await this.prisma.generationJob.update({ where: { id: job.id }, data: { totalFiles: entries.length } });
       const manifestOverview = entries.map((e) => `- ${e.path}: ${e.purpose}`).join('\n');

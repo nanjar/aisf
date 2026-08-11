@@ -1,4 +1,4 @@
-export const BACKEND_MANIFEST_PROMPT_VERSION = 'backend-manifest-v1';
+export const BACKEND_MANIFEST_PROMPT_VERSION = 'backend-manifest-v2'; // v2: truncation-resistant (config file di awal, output lebih ringkas)
 export const BACKEND_FILE_PROMPT_VERSION = 'backend-file-generator-v1';
 export const BACKEND_REPAIR_PROMPT_VERSION = 'backend-repair-v1';
 
@@ -22,14 +22,20 @@ Manifest HARUS mencakup:
 ATURAN KETAT OUTPUT:
 - Balas HANYA dengan satu JSON array valid, TIDAK ADA teks lain di luar JSON,
   TIDAK ADA markdown code fence.
-- Setiap item: {"path": "src/...", "purpose": "deskripsi singkat 1 kalimat",
-  "dependsOn": ["path file lain yang isinya WAJIB dibaca untuk generate file
-  ini dengan benar, mis. service butuh baca DTO-nya"]}
-- Urutkan dari file yang paling sedikit dependency ke yang paling banyak:
-  config/DTO/entity dulu, lalu service, lalu controller, lalu module, TERAKHIR
-  app.module.ts lalu main.ts.
+- Setiap item: {"path": "src/...", "purpose": "deskripsi SANGAT singkat,
+  maksimal 8 kata", "dependsOn": ["path file lain yang isinya WAJIB dibaca
+  untuk generate file ini dengan benar — MAKSIMAL 3 path paling penting saja,
+  jangan daftar semua"]}
+- URUTAN DI JSON: taruh package.json, tsconfig.json, .env.example, src/main.ts,
+  src/app.module.ts DI PALING AWAL array (bukan di akhir) — supaya kalau
+  output ke-truncate karena kepanjangan, file wajib ini tetap aman ter-include.
+  Urutan generate sebenarnya (dependency order) ditentukan dari "dependsOn",
+  BUKAN dari urutan array ini.
 - "dependsOn" HANYA boleh berisi path yang JUGA ada di manifest ini (bukan
   path eksternal/library).
+- JAGA TOTAL PANJANG OUTPUT — kalau project punya banyak domain, gunakan
+  "purpose" sesingkat mungkin dan "dependsOn" seminim mungkin, supaya SELURUH
+  manifest selesai dalam satu response, bukan kepotong di tengah.
 - Jangan sertakan Dockerfile atau docker-compose.yml — itu ditangani Package
   Builder secara terpisah.`;
 
