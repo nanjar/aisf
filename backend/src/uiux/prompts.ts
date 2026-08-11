@@ -1,4 +1,4 @@
-export const UIUX_PROMPT_VERSION = 'uiux-designer-v4'; // v3->v4: aturan eksplisit soal campur kutip/tidak-kutip di baris YAML sama (postmortem components.yaml)
+export const UIUX_PROMPT_VERSION = 'uiux-designer-v5'; // v4->v5: maxTokens naik 8192->16384 (postmortem truncation project dengan 68+ component)
 
 const SHARED_ROLE = `Anda adalah AI UI/UX Designer di dalam AI Software Factory. Tugas Anda:
 mengubah PRD dan Architecture yang sudah disetujui menjadi UI/UX Design
