@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import * as yaml from 'js-yaml';
 import { GenerationJobStatus, GenerationFileStatus, StageKey, StageStatus, ValidationLevel } from '@prisma/client';
@@ -17,10 +10,7 @@ import { GenerateUiuxDto } from './dto/generate-uiux.dto';
 import { UIUX_PROMPT_VERSION, UIUX_FILE_PROMPTS, buildUiuxUserPrompt } from './prompts';
 import { validateSingleFile } from './validation';
 
-/** Safety net kalau LLM tetap membungkus output dalam code fence walau sudah dilarang di prompt.
- * Dipecah jadi 2 replace independen (bukan 1 regex end-to-end) supaya tetap robust walau closing
- * fence tidak persis di akhir string (trailing whitespace/newline ekstra, dsb — kasus nyata yang
- * bikin regex versi awal gagal match dan fence ```yaml lolos mentah-mentah ke parser YAML). */
+/** Safety net kalau LLM tetap membungkus output dalam code fence walau sudah dilarang di prompt. */
 function stripCodeFence(content: string): string {
   let text = content.trim();
   text = text.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
@@ -39,6 +29,36 @@ const REQUIRED_FILES = [
 ] as const;
 
 const MAX_ATTEMPTS = 3; // §36 — retry tidak boleh infinite
+const MAX_COMPONENTS = 40; // buffer kecil di atas batas 30 yang diminta di prompt
+
+/**
+ * Fix (postmortem: project dengan 160+, lalu 307+ component walau prompt
+ * sudah eksplisit larang >30) — instruksi prompt saja TIDAK CUKUP diandalkan,
+ * LLM kadang tetap tidak patuh. Ini enforcement PROGRAMATIK yang menjamin
+ * batas jumlah component terlepas dari kepatuhan LLM: potong paksa ke
+ * MAX_COMPONENTS kalau kelebihan, alih-alih menggagalkan seluruh generation.
+ */
+function enforceComponentCap(content: string): string {
+  try {
+    const parsed = yaml.load(content);
+    if (!parsed || typeof parsed !== 'object') return content;
+
+    if (Array.isArray(parsed)) {
+      if (parsed.length <= MAX_COMPONENTS) return content;
+      return yaml.dump(parsed.slice(0, MAX_COMPONENTS));
+    }
+
+    const doc = parsed as Record<string, unknown>;
+    if (Array.isArray(doc.components) && doc.components.length > MAX_COMPONENTS) {
+      doc.components = doc.components.slice(0, MAX_COMPONENTS);
+      return yaml.dump(doc);
+    }
+    return content;
+  } catch {
+    // Parse gagal di sini -> biarkan validateSingleFile yang nanti kasih pesan error YAML yang jelas.
+    return content;
+  }
+}
 
 @Injectable()
 export class UiuxService {
@@ -50,17 +70,30 @@ export class UiuxService {
     private readonly llm: LLMService,
   ) {}
 
-  /** §81 n8n flow — dipanggil setelah Architecture APPROVED. */
-  async generate(dto: GenerateUiuxDto) {
+  /**
+   * §81 n8n flow — dipanggil setelah Architecture APPROVED.
+   *
+   * Fix arsitektur (postmortem: n8n HTTP node timeout 300s, backend masih
+   * proses di background waktu n8n sudah nyerah nunggu) — method ini SEKARANG
+   * fire-and-forget, sama seperti BackendGenService/FrontendGenService. Dulu
+   * generate 7 file muat di bawah 60 detik jadi aman disinkronkan langsung
+   * ke 1 HTTP request; sekarang dengan maxTokens yang jauh lebih besar
+   * (project component-heavy) durasi bisa lebih dari 5 menit. TIDAK ADA LAGI
+   * exception yang dilempar dari method ini — semua error path cuma log +
+   * update database, controller yang memanggil TIDAK await hasil method ini.
+   */
+  async generate(dto: GenerateUiuxDto): Promise<void> {
     const project = await this.prisma.project.findUnique({
       where: { id: dto.projectId },
       include: { stages: true },
     });
-    if (!project) throw new NotFoundException('Project tidak ditemukan');
+    if (!project) {
+      this.logger.error(`[UiuxGen] Project ${dto.projectId} tidak ditemukan`);
+      return;
+    }
     if (!project.createdById) {
-      throw new BadRequestException(
-        'Project ini belum punya createdById (dibuat sebelum V1.2) — tidak bisa tentukan folder S3.',
-      );
+      this.logger.error(`[UiuxGen] ${dto.projectId} belum punya createdById`);
+      return;
     }
 
     const prdStage = project.stages.find((s) => s.stageKey === StageKey.PRD);
@@ -68,18 +101,16 @@ export class UiuxService {
     const uiuxStage = project.stages.find((s) => s.stageKey === StageKey.UIUX);
 
     if (!prdStage || prdStage.status !== StageStatus.APPROVED || !prdStage.content) {
-      throw new ConflictException('PRD belum APPROVED — UI/UX Designer butuh PRD sebagai input.');
+      return this.logger.warn(`[UiuxGen] ${dto.projectId}: PRD belum APPROVED`);
     }
     if (!archStage || archStage.status !== StageStatus.APPROVED || !archStage.content) {
-      throw new ConflictException('Architecture belum APPROVED — UI/UX Designer butuh Architecture sebagai input.');
+      return this.logger.warn(`[UiuxGen] ${dto.projectId}: Architecture belum APPROVED`);
     }
     if (!uiuxStage) {
-      throw new NotFoundException(
-        'Stage UIUX tidak ditemukan untuk project ini (project dibuat sebelum V1.3 Fase 2?)',
-      );
+      return this.logger.error(`[UiuxGen] ${dto.projectId}: stage UIUX tidak ditemukan`);
     }
     if (uiuxStage.status === StageStatus.GENERATING) {
-      throw new ConflictException('Generation UI/UX untuk project ini sedang berjalan.');
+      return this.logger.warn(`[UiuxGen] ${dto.projectId}: generation sedang berjalan, dilewati`);
     }
 
     // §36/§75 RETRY_EXHAUSTED — hitung attempt dari histori job yang sudah ada untuk stage ini.
@@ -88,9 +119,13 @@ export class UiuxService {
     });
     const attempt = previousAttempts + 1;
     if (attempt > MAX_ATTEMPTS) {
-      throw new ConflictException(
-        `RETRY_EXHAUSTED — sudah ${previousAttempts} kali percobaan (maksimal ${MAX_ATTEMPTS}). Perlu intervensi manual.`,
-      );
+      await this.prisma.artifactStage.update({
+        where: { id: uiuxStage.id },
+        data: {
+          content: `⚠️ RETRY_EXHAUSTED — sudah ${previousAttempts} percobaan generate (maksimal ${MAX_ATTEMPTS}). Hapus GenerationJob lama (status FAILED) untuk stage ini kalau mau retry lagi.`,
+        },
+      });
+      return this.logger.error(`[UiuxGen] ${dto.projectId}: RETRY_EXHAUSTED setelah ${previousAttempts} percobaan`);
     }
 
     await this.prisma.artifactStage.update({
@@ -119,10 +154,6 @@ export class UiuxService {
         architectureContent: archStage.content,
       });
 
-      // v2 — 1 panggilan LLM per file (bukan 1 JSON gabungan raksasa, lihat
-      // uiux-designer-v1 postmortem: DeepSeek sering memotong output di
-      // tengah JSON besar). Sequential, bukan paralel — lebih gampang
-      // didiagnosis kalau ada yang gagal, dan menghindari rate limit burst.
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
       let totalTokens = 0;
@@ -134,7 +165,7 @@ export class UiuxService {
           systemPrompt: filePrompt.systemPrompt,
           userPrompt,
           promptVersion: UIUX_PROMPT_VERSION,
-          maxTokens: 32768, // v6: naikkan lagi dari 16384 - project 160+ component masih kepotong walau sudah dinaikkan sekali
+          maxTokens: 32768,
         });
 
         totalInputTokens += response.inputTokens;
@@ -142,12 +173,12 @@ export class UiuxService {
         totalTokens += response.totalTokens;
         lastModel = response.model;
 
-        const content = stripCodeFence(response.content);
+        let content = stripCodeFence(response.content);
+        if (filePrompt.fileName === 'components.yaml') {
+          content = enforceComponentCap(content);
+        }
         results.push({ fileName: filePrompt.fileName, content, outcome: validateSingleFile(filePrompt.fileName, content) });
 
-        // Fix bug (sama seperti backend-gen.service.ts): update generatedFiles
-        // per iterasi, bukan cuma di akhir — supaya progress bar StageCard
-        // beneran bergerak, bukan lompat dari 0 ke 7 pas selesai semua.
         await this.prisma.generationJob.update({
           where: { id: job.id },
           data: { generatedFiles: results.length },
@@ -156,12 +187,7 @@ export class UiuxService {
 
       await this.prisma.generationJob.update({
         where: { id: job.id },
-        data: {
-          model: lastModel,
-          inputTokens: totalInputTokens,
-          outputTokens: totalOutputTokens,
-          totalTokens,
-        },
+        data: { model: lastModel, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, totalTokens },
       });
 
       // Catat semua file + hasil validasi dulu untuk audit, terlepas dari lolos/tidak (§18 audit).
@@ -188,11 +214,8 @@ export class UiuxService {
 
       const invalidCount = results.filter((r) => !r.outcome.passed).length;
       if (invalidCount > 0) {
-        await this.prisma.generationJob.update({
-          where: { id: job.id },
-          data: { invalidFiles: invalidCount },
-        });
-        return await this.failJob(
+        await this.prisma.generationJob.update({ where: { id: job.id }, data: { invalidFiles: invalidCount } });
+        return this.failJob(
           uiuxStage.id,
           job.id,
           'FILE_VALIDATION_FAILED',
@@ -221,7 +244,7 @@ export class UiuxService {
 
       const summary = this.buildSummary(results);
 
-      const updatedStage = await this.prisma.artifactStage.update({
+      await this.prisma.artifactStage.update({
         where: { id: uiuxStage.id },
         data: {
           status: StageStatus.GENERATED,
@@ -243,26 +266,21 @@ export class UiuxService {
           data: { n8nExecutionId: dto.n8nExecutionId },
         });
       }
-
-      return { ok: true, stage: updatedStage, generationJobId: job.id };
     } catch (err) {
-      if (err instanceof UnprocessableEntityException || err instanceof ConflictException) {
-        throw err; // sudah ditangani failJob di atas
-      }
       const category = err instanceof LLMProviderError ? err.category : 'LLM_ERROR';
       const message = (err as Error).message ?? 'Unknown error';
-      this.logger.error(`UI/UX generation gagal untuk project ${dto.projectId}: ${message}`, err as Error);
-      return this.failJob(uiuxStage.id, job.id, category, message);
+      this.logger.error(`[UiuxGen] Gagal untuk project ${dto.projectId}: ${message}`, err as Error);
+      await this.failJob(uiuxStage.id, job.id, category, message);
     }
   }
 
-  /** Tandai job+stage gagal secara konsisten (§75 failure categories), lalu lempar 422 ke caller. */
+  /** Tandai job+stage gagal secara konsisten (§75 failure categories). Tidak melempar exception lagi (§ lihat generate()). */
   private async failJob(
     artifactStageId: string,
     generationJobId: string,
     errorCategory: string,
     errorMessage: string,
-  ): Promise<never> {
+  ): Promise<void> {
     await this.prisma.generationJob.update({
       where: { id: generationJobId },
       data: { status: GenerationJobStatus.FAILED, errorCategory, errorMessage, completedAt: new Date() },
@@ -272,7 +290,6 @@ export class UiuxService {
       where: { id: artifactStageId },
       data: { status: StageStatus.PENDING },
     });
-    throw new UnprocessableEntityException({ errorCategory, errorMessage, generationJobId });
   }
 
   /** Ringkasan singkat buat ArtifactStage.content — detail lengkap ada di 7 file S3 + GenerationFile. */
@@ -300,15 +317,10 @@ export class UiuxService {
 
   /**
    * §Fix (gap ditemukan setelah Fase 2 live): Frontend Developer Agent di n8n
-   * SEBELUMNYA tidak pernah membaca output UI/UX Designer — jadi 7 file yang
-   * sudah di-approve manusia tidak dipakai sama sekali oleh stage berikutnya,
-   * bertentangan dengan tujuan sistem ini (manusia cuma approve, bukan
-   * menerjemahkan manual). Method ini menggabungkan 7 file jadi satu teks yang
-   * dipanggil n8n TEPAT SEBELUM Frontend Developer Agent (bukan di-attach ke
-   * payload utama yang mengalir ke semua node lain) supaya tidak menambah
-   * ukuran payload di node-node lain yang tidak butuh — sudah pernah ada
-   * insiden 413 request entity too large gara-gara payload menggelembung
-   * (lihat komentar di Package Builder code node).
+   * SEBELUMNYA tidak pernah membaca output UI/UX Designer. Method ini
+   * menggabungkan 7 file jadi satu teks yang dipanggil n8n TEPAT SEBELUM
+   * Frontend Developer Agent — endpoint terpisah ini TETAP synchronous
+   * (bukan fire-and-forget) karena murni baca S3, cepat, beda dari generate().
    */
   async getContentForFrontend(projectId: string): Promise<{ combined: string; fileCount: number }> {
     const uiuxStage = await this.prisma.artifactStage.findFirst({
