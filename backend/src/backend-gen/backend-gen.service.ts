@@ -309,7 +309,7 @@ export class BackendGenService {
                 data: {
                   generationFileId: gf.id,
                   attemptNumber: healingRounds,
-                  errorSummary: (validation.errorLog ?? '').slice(0, 2000),
+                  errorSummary: (validation.errorLog ?? '').slice(-2000),
                   repairPromptVersion: BACKEND_REPAIR_PROMPT_VERSION,
                   resultStatus: GenerationFileStatus.GENERATED,
                 },
@@ -378,7 +378,7 @@ export class BackendGenService {
           where: { id: backendStage.id },
           data: {
             artifactName: 'backend/*',
-            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(0, 4000)}`,
+            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-4000)}`,
             resumeUrl: dto.resumeUrl ?? null,
             generatedAt: new Date(),
           },
@@ -388,7 +388,7 @@ export class BackendGenService {
           data: {
             status: GenerationJobStatus.FAILED,
             errorCategory: 'BUILD_FAILED',
-            errorMessage: (validation.errorLog ?? '').slice(0, 4000),
+            errorMessage: (validation.errorLog ?? '').slice(-4000),
             completedAt: new Date(),
           },
         });

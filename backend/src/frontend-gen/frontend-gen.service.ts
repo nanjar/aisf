@@ -287,7 +287,7 @@ export class FrontendGenService {
                 data: {
                   generationFileId: gf.id,
                   attemptNumber: healingRounds,
-                  errorSummary: (validation.errorLog ?? '').slice(0, 2000),
+                  errorSummary: (validation.errorLog ?? '').slice(-2000),
                   repairPromptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
                   resultStatus: GenerationFileStatus.GENERATED,
                 },
@@ -337,7 +337,7 @@ export class FrontendGenService {
           where: { id: frontendStage.id },
           data: {
             artifactName: 'frontend/*',
-            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(0, 4000)}`,
+            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-4000)}`,
             resumeUrl: dto.resumeUrl ?? null,
             generatedAt: new Date(),
           },
@@ -347,7 +347,7 @@ export class FrontendGenService {
           data: {
             status: GenerationJobStatus.FAILED,
             errorCategory: 'BUILD_FAILED',
-            errorMessage: (validation.errorLog ?? '').slice(0, 4000),
+            errorMessage: (validation.errorLog ?? '').slice(-4000),
             completedAt: new Date(),
           },
         });
