@@ -94,6 +94,17 @@ export class BackendGenService {
     const previousAttempts = await this.prisma.generationJob.count({ where: { artifactStageId: backendStage.id } });
     const attempt = previousAttempts + 1;
     if (attempt > MAX_ATTEMPTS) {
+      // Fix (postmortem debugging session): sebelumnya cuma logger.error, tidak
+      // terlihat sama sekali dari UI/database kalau trigger ditolak diam-diam
+      // di sini — bikin developer salah diagnosis (ngira job baru dibuat &
+      // gagal, padahal job BARU tidak pernah tercipta sama sekali). Sekarang
+      // ditulis eksplisit ke ArtifactStage.content supaya kelihatan di UI.
+      await this.prisma.artifactStage.update({
+        where: { id: backendStage.id },
+        data: {
+          content: `⚠️ RETRY_EXHAUSTED — sudah ${previousAttempts} percobaan generate (maksimal ${MAX_ATTEMPTS}). Hapus GenerationJob lama (status FAILED) untuk stage ini kalau mau retry lagi, atau naikkan MAX_ATTEMPTS kalau memang perlu lebih banyak percobaan.`,
+        },
+      });
       return this.logger.error(`[BackendGen] ${dto.projectId}: RETRY_EXHAUSTED setelah ${previousAttempts} percobaan`);
     }
 

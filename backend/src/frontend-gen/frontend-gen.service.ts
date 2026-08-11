@@ -86,6 +86,12 @@ export class FrontendGenService {
     const previousAttempts = await this.prisma.generationJob.count({ where: { artifactStageId: frontendStage.id } });
     const attempt = previousAttempts + 1;
     if (attempt > MAX_ATTEMPTS) {
+      await this.prisma.artifactStage.update({
+        where: { id: frontendStage.id },
+        data: {
+          content: `⚠️ RETRY_EXHAUSTED — sudah ${previousAttempts} percobaan generate (maksimal ${MAX_ATTEMPTS}). Hapus GenerationJob lama (status FAILED) untuk stage ini kalau mau retry lagi.`,
+        },
+      });
       return this.logger.error(`[FrontendGen] ${dto.projectId}: RETRY_EXHAUSTED setelah ${previousAttempts} percobaan`);
     }
 
