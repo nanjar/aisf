@@ -65,6 +65,44 @@ export class StagesController {
     return { url, expiresInSeconds: 900 };
   }
 
+  /**
+   * §UX — dashboard butuh info progres+estimasi durasi buat stage yang lagi
+   * generate (bisa 10-40+ menit untuk Backend/Frontend dengan puluhan file).
+   * Generic untuk stage manapun yang pakai GenerationJob (UIUX, BACKEND, dan
+   * FRONTEND/DATABASE nanti begitu dimigrasikan) — tidak spesifik ke 1 stage.
+   */
+  @Get(':stageKey/progress')
+  async progress(@Param('projectId', ParseUUIDPipe) projectId: string, @Param('stageKey') stageKey: StageKey) {
+    const stage = await this.prisma.artifactStage.findUnique({
+      where: { projectId_stageKey: { projectId, stageKey } },
+    });
+    if (!stage) return { active: false };
+
+    const job = await this.prisma.generationJob.findFirst({
+      where: { artifactStageId: stage.id, status: { in: ['RUNNING', 'VALIDATING'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!job || !job.startedAt) return { active: false };
+
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - job.startedAt.getTime()) / 1000));
+    const avgSecondsPerFile = job.generatedFiles > 0 ? elapsedSeconds / job.generatedFiles : null;
+    const remainingFiles = Math.max(0, job.totalFiles - job.generatedFiles);
+    const estimatedRemainingSeconds =
+      avgSecondsPerFile !== null && job.totalFiles > 0 ? Math.round(avgSecondsPerFile * remainingFiles) : null;
+
+    return {
+      active: true,
+      status: job.status,
+      totalFiles: job.totalFiles,
+      generatedFiles: job.generatedFiles,
+      invalidFiles: job.invalidFiles,
+      elapsedSeconds,
+      estimatedRemainingSeconds, // null = belum ada file selesai sama sekali, belum bisa diestimasi
+      attempt: job.attempt,
+      maxAttempts: job.maxAttempts,
+    };
+  }
+
   // Tidak dibatasi @Roles() di sini — permission per-stage (assignment-based
   // untuk MEMBER) dicek di dalam StagesService.decide() itu sendiri, karena
   // butuh tahu stageKey mana yang di-assign, bukan sekadar role global.

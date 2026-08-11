@@ -43,8 +43,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export type ProjectStatus = 'RUNNING' | 'COMPLETED' | 'REJECTED' | 'FAILED';
-export type StageStatus = 'PENDING' | 'GENERATED' | 'APPROVED' | 'REJECTED' | 'REVISION_REQUESTED';
-export type StageKey = 'PRD' | 'ARCHITECTURE' | 'ESTIMATION' | 'DATABASE' | 'BACKEND' | 'FRONTEND' | 'QA' | 'PACKAGE';
+export type StageStatus =
+  | 'PENDING'
+  | 'GENERATING'
+  | 'VALIDATING'
+  | 'SELF_HEALING'
+  | 'GENERATED'
+  | 'REVISION_REQUESTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'ARCHIVED';
+export type StageKey = 'PRD' | 'ARCHITECTURE' | 'UIUX' | 'ESTIMATION' | 'DATABASE' | 'BACKEND' | 'FRONTEND' | 'QA' | 'PACKAGE';
 
 export interface ProjectSummary {
   id: string;
@@ -105,6 +114,19 @@ export interface ArtifactFile {
   checksum: string;
   version: number;
   createdAt: string;
+}
+
+// V1.3 — progres+estimasi durasi generation file-by-file, lihat StagesController.progress()
+export interface StageProgress {
+  active: boolean;
+  status?: 'RUNNING' | 'VALIDATING';
+  totalFiles?: number;
+  generatedFiles?: number;
+  invalidFiles?: number;
+  elapsedSeconds?: number;
+  estimatedRemainingSeconds?: number | null;
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 export type OrgRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
@@ -199,6 +221,12 @@ export const api = {
     request<{ url: string; expiresInSeconds: number }>(
       `/projects/${projectId}/stages/${stageKey}/files/${fileId}/download-url`,
     ),
+
+  // V1.3 — progres real-time + estimasi durasi untuk stage yang lagi generate
+  // file-by-file (UIUX, BACKEND, dan FRONTEND/DATABASE nanti). active:false
+  // kalau tidak ada GenerationJob yang lagi jalan untuk stage ini.
+  getStageProgress: (projectId: string, stageKey: StageKey) =>
+    request<StageProgress>(`/projects/${projectId}/stages/${stageKey}/progress`),
 
   listMembers: (orgId: string) => request<OrganizationMember[]>(`/organizations/${orgId}/members`),
   inviteMember: (orgId: string, email: string, role: OrgRole) =>
