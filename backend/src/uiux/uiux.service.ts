@@ -134,7 +134,7 @@ export class UiuxService {
           systemPrompt: filePrompt.systemPrompt,
           userPrompt,
           promptVersion: UIUX_PROMPT_VERSION,
-          maxTokens: 16384, // v5: naikkan dari 8192 - project dengan banyak screen/component (68+) kena truncation di batas lama
+          maxTokens: 32768, // v6: naikkan lagi dari 16384 - project 160+ component masih kepotong walau sudah dinaikkan sekali
         });
 
         totalInputTokens += response.inputTokens;

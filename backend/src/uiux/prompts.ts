@@ -1,4 +1,4 @@
-export const UIUX_PROMPT_VERSION = 'uiux-designer-v5'; // v4->v5: maxTokens naik 8192->16384 (postmortem truncation project dengan 68+ component)
+export const UIUX_PROMPT_VERSION = 'uiux-designer-v6'; // v5->v6: batas keras 30 component (bukan saran) + maxTokens 16384->32768
 
 const SHARED_ROLE = `Anda adalah AI UI/UX Designer di dalam AI Software Factory. Tugas Anda:
 mengubah PRD dan Architecture yang sudah disetujui menjadi UI/UX Design
@@ -77,16 +77,24 @@ ${OUTPUT_RULES_YAML}`,
     fileName: 'components.yaml',
     systemPrompt: `${SHARED_ROLE}
 
-File yang diminta: components.yaml — spesifikasi SETIAP reusable component
+File yang diminta: components.yaml — spesifikasi reusable component
 (top-level key "components" berisi list). Setiap component WAJIB punya: id,
 name, purpose, props, states, variants, responsive, accessibility.
 
-PENTING soal panjang output: fokus ke reusable component yang BENAR-BENAR
-dipakai lintas screen (biasanya 10-20 component untuk aplikasi menengah,
-JANGAN membuat entri untuk setiap variasi kecil sebagai component terpisah).
+BATASAN KERAS (bukan saran): MAKSIMAL 30 COMPONENT, TIDAK BOLEH LEBIH. Kalau
+aplikasi punya banyak elemen UI serupa, GABUNGKAN jadi 1 component fleksibel
+dengan "variants"/"props" yang parameterized — JANGAN bikin component
+terpisah untuk tiap variasi kecil (mis. "PrimaryButton", "SecondaryButton",
+"DangerButton" harus jadi SATU component "Button" dengan variant
+primary/secondary/danger, BUKAN 3 entry terpisah). Prioritaskan component
+yang benar-benar dipakai berulang lintas screen. Kalau terpaksa harus pilih
+antara lengkap-tapi-melebihi-30 atau ringkas-di-bawah-30, PILIH RINGKAS —
+component yang tidak masuk daftar tetap bisa diimplementasikan inline oleh
+Frontend Developer nanti, itu tidak masalah.
+
 Jaga tiap field TETAP RINGKAS (mis. "props" cukup nama+tipe singkat) supaya
 SELURUH daftar component selesai dalam satu response, bukan kepotong di
-tengah karena satu component ditulis terlalu detail atau daftarnya kepanjangan.
+tengah.
 
 ${OUTPUT_RULES_YAML}`,
   },
