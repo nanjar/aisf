@@ -250,6 +250,18 @@ export class StagesService {
    * yang boleh memanggil resumeUrl n8n, sekarang juga satu-satunya tempat
    * yang menegakkan permission per-stage (§7.1), termasuk assignment ke team.
    */
+  /**
+   * PENTING soal urutan operasi (postmortem produksi, execution #12534):
+   * DB update WAJIB terjadi SEBELUM axios.post(resumeUrl,...), bukan
+   * sesudahnya. Kalau dibalik (versi lama): begitu resumeUrl dipanggil, n8n
+   * langsung lanjut ke node berikutnya — kalau node itu callback balik ke
+   * backend kita sendiri (mis. "Trigger UIUX Generation" mengecek
+   * ArtifactStage.status stage sebelumnya), race condition: n8n bisa saja
+   * query status stage KITA SENDIRI sebelum UPDATE di bawah sempat commit,
+   * dapat status lama (GENERATED, bukan APPROVED) -> 409 palsu. Bug ini
+   * sudah lama ada tapi baru kelihatan sekarang karena baru sekarang ada
+   * stage yang langsung callback secepat itu ke backend sendiri.
+   */
   async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, caller: CallerContext) {
     const stage = await this.prisma.artifactStage.findUnique({
       where: { projectId_stageKey: { projectId, stageKey } },
@@ -270,14 +282,8 @@ export class StagesService {
     if (dto.decision === 'revision_requested') {
       if (!dto.comment) throw new BadRequestException('comment wajib diisi untuk request revision');
 
-      try {
-        await axios.post(stage.resumeUrl, { decision: 'revision', note: dto.comment, approver: caller.email });
-      } catch (err) {
-        throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
-      }
-
       const nextRevisionNumber = stage.revisionCount + 1;
-      return this.prisma.$transaction(async (tx) => {
+      const updated = await this.prisma.$transaction(async (tx) => {
         await tx.revisionRequest.create({
           data: {
             artifactStageId: stage.id,
@@ -291,16 +297,14 @@ export class StagesService {
           data: { status: StageStatus.REVISION_REQUESTED, revisionCount: nextRevisionNumber, resumeUrl: null },
         });
       });
-    }
 
-    try {
-      await axios.post(stage.resumeUrl, {
-        decision: dto.decision,
-        comment: dto.comment ?? '',
-        approver: caller.email,
-      });
-    } catch (err) {
-      throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
+      try {
+        await axios.post(stage.resumeUrl, { decision: 'revision', note: dto.comment, approver: caller.email });
+      } catch (err) {
+        throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
+      }
+
+      return updated;
     }
 
     const updated = await this.prisma.artifactStage.update({
@@ -317,6 +321,23 @@ export class StagesService {
 
     if (dto.decision === 'rejected') {
       await this.prisma.project.update({ where: { id: projectId }, data: { status: ProjectStatus.REJECTED } });
+    }
+
+    try {
+      await axios.post(stage.resumeUrl, {
+        decision: dto.decision,
+        comment: dto.comment ?? '',
+        approver: caller.email,
+      });
+    } catch (err) {
+      // Trade-off yang disadari: DB sudah ter-update duluan (lihat komentar
+      // di atas method ini) — kalau resumeUrl gagal DI SINI, stage sudah
+      // APPROVED/REJECTED di database tapi n8n tidak pernah tahu, dan
+      // resumeUrl sudah di-null-kan jadi tidak bisa dicoba lagi lewat
+      // decide(). Ini kasus langka (network blip ke n8n di server yang sama)
+      // dan jauh lebih jarang daripada race condition yang barusan diperbaiki
+      // — kalau kejadian, perlu intervensi manual (reset resumeUrl dari DB).
+      throw new BadGatewayException(`Gagal mengirim keputusan ke n8n: ${(err as Error).message}`);
     }
 
     return updated;
