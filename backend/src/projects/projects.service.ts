@@ -33,7 +33,7 @@ export class ProjectsService {
     const membership = await this.prisma.organizationMember.findFirst({
       where: { userId: createdById, status: 'ACTIVE' },
       orderBy: { invitedAt: 'asc' },
-      select: { organizationId: true },
+      select: { id: true, organizationId: true },
     });
 
     const project = await this.prisma.project.create({
@@ -50,6 +50,21 @@ export class ProjectsService {
       },
       include: { stages: true },
     });
+
+    // Fix UX: sebelumnya semua stage default "Unassigned" — membingungkan
+    // (assignment kelihatan kosong padahal creator sendiri yang bikin project).
+    // Default-kan ke creator; user tetap bebas re-assign ke member/team lain
+    // kapan saja lewat PUT .../assignment seperti biasa.
+    if (membership) {
+      await this.prisma.stageAssignment.createMany({
+        data: STAGE_ORDER.map((stageKey) => ({
+          projectId: project.id,
+          stageKey,
+          assignedMemberId: membership.id,
+          assignedBy: createdById,
+        })),
+      });
+    }
 
     const webhookUrl = this.config.get<string>('N8N_START_WEBHOOK_URL');
     try {
