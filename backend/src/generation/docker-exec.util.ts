@@ -64,14 +64,18 @@ export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult
 
     const start = await execDocker(['start', '-a', containerName], timeoutMs);
 
-    // Label eksplisit kasus yang gampang salah diagnosis kalau cuma lihat
-    // stdout/stderr mentah (postmortem: log kepotong pas baru sampai warning
-    // npm, tidak jelas apakah itu timeout, OOM, atau error asli).
+    // Label eksplisit ditaruh di AKHIR (bukan awal) — errorMessage yang
+    // disimpan di database di-slice(-4000) (ambil bagian AKHIR teks, lihat
+    // fix sebelumnya soal error kepotong di awal). Kalau label ini ditaruh
+    // di depan, dia sendiri yang kepotong hilang duluan pas di-slice(-4000)
+    // di layer atasnya (backend-gen.service.ts) — persis bug yang baru
+    // ketahuan: [TIMEOUT]/[OOM KILLED] tidak pernah kelihatan di database
+    // walau logic-nya jalan, karena kepotong sebelum sempat disimpan.
     if (start.timedOut) {
-      return { ...start, stderr: `[TIMEOUT setelah ${Math.round(timeoutMs / 1000)}s]\n${start.stderr}` };
+      return { ...start, stderr: `${start.stderr}\n[TIMEOUT setelah ${Math.round(timeoutMs / 1000)}s]` };
     }
     if (start.exitCode === 137) {
-      return { ...start, stderr: `[OOM KILLED — kemungkinan besar --memory limit kurang]\n${start.stderr}` };
+      return { ...start, stderr: `${start.stderr}\n[OOM KILLED — kemungkinan besar --memory limit kurang]` };
     }
     return start;
   } finally {
