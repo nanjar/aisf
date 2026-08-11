@@ -1,4 +1,4 @@
-export const UIUX_PROMPT_VERSION = 'uiux-designer-v3'; // v2->v3: fix stripCodeFence + kendalikan panjang screens/components
+export const UIUX_PROMPT_VERSION = 'uiux-designer-v4'; // v3->v4: aturan eksplisit soal campur kutip/tidak-kutip di baris YAML sama (postmortem components.yaml)
 
 const SHARED_ROLE = `Anda adalah AI UI/UX Designer di dalam AI Software Factory. Tugas Anda:
 mengubah PRD dan Architecture yang sudah disetujui menjadi UI/UX Design
@@ -15,7 +15,13 @@ const OUTPUT_RULES_YAML = `ATURAN KETAT OUTPUT:
 - JANGAN pakai markdown code fence (tanpa \`\`\`yaml atau \`\`\`).
 - JANGAN ada penjelasan/preamble sebelum atau sesudah YAML.
 - Jangan pernah memotong output di tengah — kalau perlu, buat lebih ringkas
-  supaya tetap lengkap dan valid sebagai YAML.`;
+  supaya tetap lengkap dan valid sebagai YAML.
+- HATI-HATI dengan tanda kutip: kalau sebuah value butuh dikutip (mis. ada
+  tanda baca), kutip SELURUH value dari awal sampai akhir dalam SATU pasang
+  kutip — JANGAN campur teks berkutip dengan teks tidak berkutip di baris
+  yang sama. SALAH: \`- loadMore: "Load more" button\`. BENAR:
+  \`- loadMore: "Load more button"\` atau \`- loadMore: Load more button\`
+  (tanpa kutip sama sekali kalau tidak perlu).`;
 
 const OUTPUT_RULES_MD = `ATURAN KETAT OUTPUT:
 - Balas HANYA dengan isi mentah file Markdown ini.
