@@ -10,5 +10,6 @@ import { UiuxModule } from '../uiux/uiux.module';
   imports: [StorageModule, LLMModule, GenerationModule, UiuxModule],
   controllers: [BackendGenController],
   providers: [BackendGenService],
+  exports: [BackendGenService], // V1.3 — dipakai frontend-gen buat ambil Backend API Contract summary
 })
 export class BackendGenModule {}

@@ -13,6 +13,10 @@ digenerate, BUKAN isi filenya. Stack: ${TECH_STACK}
 
 Manifest HARUS mencakup:
 - Semua file config dasar: package.json, tsconfig.json, .env.example, src/main.ts, src/app.module.ts
+- package.json WAJIB punya script "build" yang menghasilkan folder dist/ (mis.
+  "nest build" atau "tsc -p tsconfig.build.json") — validator akan menjalankan
+  "npm run build" sungguhan, generation GAGAL kalau script ini tidak ada atau
+  tidak benar-benar berhasil compile.
 - 1 module NestJS per domain sesuai Architecture (controller, service, module,
   DTO per domain) — cukup untuk MENDUKUNG SEMUA endpoint yang tersirat dari
   "actions" di setiap screen pada UI/UX Design Specification. Jangan sampai
