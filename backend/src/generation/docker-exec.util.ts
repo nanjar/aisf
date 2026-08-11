@@ -44,7 +44,7 @@ export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult
     'create',
     '--name', containerName,
     '--network', opts.network ?? 'none',
-    '--memory', '1g',
+    '--memory', '2g',
     '--cpus', '2',
     '--pids-limit', '512',
     '--security-opt', 'no-new-privileges',
@@ -63,6 +63,16 @@ export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult
     }
 
     const start = await execDocker(['start', '-a', containerName], timeoutMs);
+
+    // Label eksplisit kasus yang gampang salah diagnosis kalau cuma lihat
+    // stdout/stderr mentah (postmortem: log kepotong pas baru sampai warning
+    // npm, tidak jelas apakah itu timeout, OOM, atau error asli).
+    if (start.timedOut) {
+      return { ...start, stderr: `[TIMEOUT setelah ${Math.round(timeoutMs / 1000)}s]\n${start.stderr}` };
+    }
+    if (start.exitCode === 137) {
+      return { ...start, stderr: `[OOM KILLED — kemungkinan besar --memory limit kurang]\n${start.stderr}` };
+    }
     return start;
   } finally {
     // Cleanup selalu dijalankan, terlepas dari hasil di atas — container

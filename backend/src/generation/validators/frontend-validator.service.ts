@@ -14,7 +14,7 @@ export class FrontendValidatorService {
       image: 'node:20-slim',
       workdir,
       network: 'bridge',
-      timeoutMs: 10 * 60_000,
+      timeoutMs: 15 * 60_000,
       command: ['sh', '-c', 'npm install --no-audit --no-fund && npx tsc --noEmit && npm run build'],
     });
 
