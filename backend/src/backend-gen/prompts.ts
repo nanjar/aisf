@@ -87,12 +87,25 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
 - Jangan pernah memotong output di tengah.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
+  const packageJsonHint =
+    fileInfo.path === 'package.json'
+      ? `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
+ADA dan yakin benar (mis. "@nestjs/common", "@nestjs/core", "@nestjs/config",
+"@prisma/client", "class-validator", "class-transformer", "ioredis",
+"@nestjs-modules/ioredis", "amqplib", "bcrypt", dst — package populer dan
+umum dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
+tidak yakin ada (mis. "nestjs-ioredis" BUKAN package asli — yang benar
+"ioredis" langsung atau "@nestjs-modules/ioredis"). Kalau ragu apakah
+sebuah package benar-benar ada di npm, JANGAN pakai — cari alternatif yang
+sudah pasti familiar.\n`
+      : '';
+
   return `Anda adalah AI Backend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 Anda sedang generate SATU file dari manifest backend, SATU PER PANGGILAN:
 - Path: ${fileInfo.path}
 - Tujuan file ini: ${fileInfo.purpose}
-
+${packageJsonHint}
 ${OUTPUT_RULES}`;
 }
 
@@ -130,11 +143,23 @@ export function buildFileUserPrompt(params: {
 }
 
 export function buildRepairSystemPrompt(fileInfo: { path: string }): string {
+  const packageJsonHint =
+    fileInfo.path === 'package.json'
+      ? `\nKalau error-nya "No matching version found" / "notarget" / "E404" untuk
+sebuah package: package itu KEMUNGKINAN BESAR TIDAK ADA di npm registry
+(nama hasil karangan). JANGAN coba versi lain dari package yang sama —
+GANTI ke package NYATA yang benar-benar ada di npm untuk kebutuhan yang
+sama (mis. untuk Redis di NestJS pakai "ioredis" langsung atau
+"@nestjs-modules/ioredis", BUKAN "nestjs-ioredis"). Kalau tidak yakin
+package mana yang benar ada, HAPUS dependency itu daripada menebak nama
+yang mungkin juga tidak ada.\n`
+      : '';
+
   return `Anda adalah AI Backend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 File "${fileInfo.path}" gagal compile. Perbaiki HANYA error yang disebutkan
 di error log — jangan ubah behavior/struktur lain yang tidak error.
-
+${packageJsonHint}
 ${OUTPUT_RULES}`;
 }
 

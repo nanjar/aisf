@@ -382,10 +382,15 @@ export class FrontendGenService {
     await this.prisma.artifactStage.update({ where: { id: artifactStageId }, data: { status: StageStatus.PENDING } });
   }
 
+  /** Sama fix dengan backend-gen.service.ts — lihat komentar di sana. */
   private extractBrokenPaths(errorLog: string, knownPaths: string[]): string[] {
     const found = new Set<string>();
     for (const path of knownPaths) {
       if (errorLog.includes(path)) found.add(path);
+    }
+    const isNpmInstallFailure = /npm error (notarget|code E(TARGET|404|RESOLVE)|enoent)/i.test(errorLog);
+    if (found.size === 0 && isNpmInstallFailure && knownPaths.includes('package.json')) {
+      found.add('package.json');
     }
     return [...found];
   }

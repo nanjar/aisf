@@ -88,12 +88,22 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
 - Jangan pernah memotong output di tengah.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
+  const packageJsonHint =
+    fileInfo.path === 'package.json'
+      ? `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
+ADA dan yakin benar (mis. "next", "react", "react-dom", "tailwindcss",
+"@radix-ui/*", "recharts", "axios", "zod" — package populer dan umum
+dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
+tidak yakin ada. Kalau ragu, JANGAN pakai — cari alternatif yang sudah
+pasti familiar.\n`
+      : '';
+
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 Anda sedang generate SATU file dari manifest frontend, SATU PER PANGGILAN:
 - Path: ${fileInfo.path}
 - Tujuan file ini: ${fileInfo.purpose}
-
+${packageJsonHint}
 ${OUTPUT_RULES}`;
 }
 
@@ -131,11 +141,20 @@ export function buildFileUserPrompt(params: {
 }
 
 export function buildRepairSystemPrompt(fileInfo: { path: string }): string {
+  const packageJsonHint =
+    fileInfo.path === 'package.json'
+      ? `\nKalau error-nya "No matching version found" / "notarget" / "E404" untuk
+sebuah package: package itu KEMUNGKINAN BESAR TIDAK ADA di npm registry
+(nama hasil karangan). JANGAN coba versi lain dari package yang sama —
+GANTI ke package NYATA yang benar-benar ada, atau HAPUS dependency itu
+kalau tidak yakin nama yang benar.\n`
+      : '';
+
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 File "${fileInfo.path}" gagal compile/build. Perbaiki HANYA error yang
 disebutkan di error log — jangan ubah behavior/struktur lain yang tidak error.
-
+${packageJsonHint}
 ${OUTPUT_RULES}`;
 }
 

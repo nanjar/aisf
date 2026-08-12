@@ -443,10 +443,25 @@ export class BackendGenService {
   }
 
   /** tsc --noEmit selalu sertakan path file di baris error — cocokkan terhadap manifest. */
+  /**
+   * tsc/build error selalu sebutkan path file secara literal, tapi npm
+   * dependency-resolution error (ETARGET/E404/ERESOLVE — package yang tidak
+   * ada/versi tidak cocok, sering LLM hallucinate nama package) TIDAK PERNAH
+   * sebut "package.json" secara literal, cuma nama package yang bermasalah.
+   * Postmortem: self-healing selalu skip kasus ini (extractBrokenPaths tidak
+   * nemu match apapun -> break lebih awal, tidak pernah coba perbaiki).
+   * Tambahan heuristik: kalau error log jelas berasal dari `npm install`
+   * yang gagal (bukan tsc/build), target langsung package.json untuk
+   * diperbaiki — itu satu-satunya file yang masuk akal jadi sumbernya.
+   */
   private extractBrokenPaths(errorLog: string, knownPaths: string[]): string[] {
     const found = new Set<string>();
     for (const path of knownPaths) {
       if (errorLog.includes(path)) found.add(path);
+    }
+    const isNpmInstallFailure = /npm error (notarget|code E(TARGET|404|RESOLVE)|enoent)/i.test(errorLog);
+    if (found.size === 0 && isNpmInstallFailure && knownPaths.includes('package.json')) {
+      found.add('package.json');
     }
     return [...found];
   }
