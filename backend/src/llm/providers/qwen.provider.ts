@@ -61,7 +61,14 @@ export class QwenProvider implements LLMProvider {
             { role: 'system', content: request.systemPrompt },
             { role: 'user', content: request.userPrompt },
           ],
-          max_tokens: request.maxTokens ?? 8192,
+          // Fix proaktif (risiko yang sudah teridentifikasi belum sempat
+          // kejadian): qwen2.5-coder:7b context window TOTAL cuma 32768
+          // token (input+output DIGABUNG) — beda dari DeepSeek yang jauh
+          // lebih besar. Kalau caller minta max_tokens output sampai 32768
+          // (nilai yang aman buat DeepSeek), itu bisa melebihi SISA context
+          // yang ada setelah prompt (PRD+Architecture+dst) ikut dihitung.
+          // Cap output ke nilai aman, sisakan ruang besar buat prompt.
+          max_tokens: Math.min(request.maxTokens ?? 8192, 6000),
           temperature: request.temperature ?? 0.2,
         },
         {
