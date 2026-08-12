@@ -112,6 +112,18 @@ export class UiuxService {
     if (uiuxStage.status === StageStatus.GENERATING) {
       return this.logger.warn(`[UiuxGen] ${dto.projectId}: generation sedang berjalan, dilewati`);
     }
+    // Fix (postmortem: retry n8n yang telat/redundan setelah job SEBELUMNYA
+    // sudah sukses, menimpa status GENERATED balik ke PENDING lewat
+    // failJob() job kedua) — tolak trigger baru kalau stage sudah GENERATED
+    // (siap approve). n8n cuma boleh trigger ulang endpoint ini lewat jalur
+    // revision (status jadi REVISION_REQUESTED dulu di decide(), bukan
+    // langsung dari GENERATED) — jadi guard ini aman, tidak menghalangi
+    // revision loop yang sah.
+    if (uiuxStage.status === StageStatus.GENERATED) {
+      return this.logger.warn(
+        `[UiuxGen] ${dto.projectId}: stage sudah GENERATED (siap approve), trigger baru diabaikan — kemungkinan retry n8n yang redundan.`,
+      );
+    }
 
     // §36/§75 RETRY_EXHAUSTED — hitung attempt dari histori job yang sudah ada untuk stage ini.
     const previousAttempts = await this.prisma.generationJob.count({

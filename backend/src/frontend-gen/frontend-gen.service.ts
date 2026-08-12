@@ -82,6 +82,11 @@ export class FrontendGenService {
     if (frontendStage.status === StageStatus.GENERATING) {
       return this.logger.warn(`[FrontendGen] ${dto.projectId}: generation sedang berjalan, dilewati`);
     }
+    if (frontendStage.status === StageStatus.GENERATED) {
+      return this.logger.warn(
+        `[FrontendGen] ${dto.projectId}: stage sudah GENERATED (siap approve), trigger baru diabaikan.`,
+      );
+    }
 
     const previousAttempts = await this.prisma.generationJob.count({ where: { artifactStageId: frontendStage.id } });
     const attempt = previousAttempts + 1;

@@ -90,6 +90,15 @@ export class BackendGenService {
     if (backendStage.status === StageStatus.GENERATING) {
       return this.logger.warn(`[BackendGen] ${dto.projectId}: generation backend sedang berjalan, dilewati`);
     }
+    // Fix (postmortem UiuxService — retry n8n redundan setelah job sebelumnya
+    // sukses bisa menimpa status GENERATED balik ke PENDING). Sama guard di
+    // sini: revision loop selalu lewat REVISION_REQUESTED dulu di decide(),
+    // tidak pernah langsung dari GENERATED — jadi ini aman.
+    if (backendStage.status === StageStatus.GENERATED) {
+      return this.logger.warn(
+        `[BackendGen] ${dto.projectId}: stage sudah GENERATED (siap approve), trigger baru diabaikan.`,
+      );
+    }
 
     const previousAttempts = await this.prisma.generationJob.count({ where: { artifactStageId: backendStage.id } });
     const attempt = previousAttempts + 1;
