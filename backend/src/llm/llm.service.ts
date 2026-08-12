@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DeepSeekProvider } from './providers/deepseek.provider';
+import { QwenProvider } from './providers/qwen.provider';
 import { GenerationRequest, GenerationResponse, LLMProvider } from './types';
 
 /**
@@ -21,8 +22,12 @@ export class LLMService {
   constructor(
     private readonly config: ConfigService,
     deepseek: DeepSeekProvider,
+    qwen: QwenProvider,
   ) {
-    this.providers = new Map<string, LLMProvider>([[deepseek.name, deepseek]]);
+    this.providers = new Map<string, LLMProvider>([
+      [deepseek.name, deepseek],
+      [qwen.name, qwen],
+    ]);
     this.defaultProviderName = this.config.get<string>('LLM_DEFAULT_PROVIDER', 'deepseek');
   }
 
