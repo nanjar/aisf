@@ -56,6 +56,12 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
     }
   }
 
+  // Fix sama dengan backend-gen/validation.ts — lihat komentar di sana.
+  if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+    const values = Object.values(parsed as Record<string, unknown>);
+    const firstArray = values.find((v) => Array.isArray(v));
+    if (firstArray) parsed = firstArray;
+  }
   if (!Array.isArray(parsed)) return { entries: [], errors: ['Manifest harus berupa JSON array'], wasTruncated };
   if (parsed.length === 0) return { entries: [], errors: ['Manifest kosong'], wasTruncated };
 

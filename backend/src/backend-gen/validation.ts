@@ -66,6 +66,17 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
     }
   }
 
+  // Fix (postmortem Qwen/model lokal): model yang kurang patuh instruksi
+  // "balas HANYA JSON array" kadang tetap bungkus dalam object (mis.
+  // {"files":[...]} atau {"manifest":[...]}) — DeepSeek jarang begini tapi
+  // model lebih kecil sering begitu. Daripada gagal total, coba cari
+  // property pertama yang nilainya array sebelum menyerah.
+  if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+    const values = Object.values(parsed as Record<string, unknown>);
+    const firstArray = values.find((v) => Array.isArray(v));
+    if (firstArray) parsed = firstArray;
+  }
+
   if (!Array.isArray(parsed)) {
     return { entries: [], errors: ['Manifest harus berupa JSON array'], wasTruncated };
   }
