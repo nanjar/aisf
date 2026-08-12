@@ -36,7 +36,7 @@ export class QwenProvider implements LLMProvider {
     // (NestJS instantiate semua provider di awal, bukan pas dipakai) — baru
     // error jelas muncul kalau provider ini BENERAN dipanggil tanpa config.
     this.baseUrl = this.config.get<string>('QWEN_BASE_URL', '');
-    this.defaultModel = this.config.get<string>('QWEN_DEFAULT_MODEL', 'qwen3:8b');
+    this.defaultModel = this.config.get<string>('QWEN_DEFAULT_MODEL', 'qwen2.5-coder:7b'); // model code-specialized, sebagian besar generation kita itu kode
     this.timeoutMs = Number(this.config.get<string>('QWEN_TIMEOUT_MS', '300000'));
   }
 
