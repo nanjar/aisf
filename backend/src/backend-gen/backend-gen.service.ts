@@ -380,12 +380,20 @@ export class BackendGenService {
           data: { status: GenerationJobStatus.COMPLETED, completedAt: new Date() },
         });
       } else {
-        // ValidationService sendiri sudah set ArtifactStage.status (GENERATED + failedValidation=true
-        // kalau selfHealingAttempts habis) — di sini kita cuma lengkapi resumeUrl/content supaya
-        // manusia tetap bisa lihat & reject/request-revision dari approval UI yang sama.
+        // Fix (postmortem: stage macet selamanya di status SELF_HEALING):
+        // asumsi lama "ValidationService otomatis set status GENERATED kalau
+        // selfHealingAttempts habis" SALAH untuk kasus loop di atas berhenti
+        // LEBIH AWAL (extractBrokenPaths tidak nemu file yang cocok, break
+        // sebelum ValidationService sempat capai titik exhaustion-nya
+        // sendiri) — status ArtifactStage ketinggalan di apapun yang
+        // ValidationService set terakhir kali (biasanya SELF_HEALING),
+        // TIDAK PERNAH direset. Sekarang eksplisit set PENDING di sini,
+        // sama seperti failJob() — supaya UI tidak pernah nunjukin badge
+        // 'lagi proses' untuk job yang sebenarnya sudah mati.
         await this.prisma.artifactStage.update({
           where: { id: backendStage.id },
           data: {
+            status: StageStatus.PENDING,
             artifactName: 'backend/*',
             content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-4000)}`,
             resumeUrl: dto.resumeUrl ?? null,

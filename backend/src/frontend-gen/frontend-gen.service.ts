@@ -338,9 +338,14 @@ export class FrontendGenService {
           data: { status: GenerationJobStatus.COMPLETED, completedAt: new Date() },
         });
       } else {
+        // Fix (sama root cause dengan backend-gen.service.ts — lihat komentar
+        // di sana): status ArtifactStage bisa ketinggalan macet kalau loop
+        // self-healing berhenti lebih awal, bukan karena ValidationService
+        // sendiri mencapai exhaustion. Eksplisit set PENDING di sini.
         await this.prisma.artifactStage.update({
           where: { id: frontendStage.id },
           data: {
+            status: StageStatus.PENDING,
             artifactName: 'frontend/*',
             content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-4000)}`,
             resumeUrl: dto.resumeUrl ?? null,
