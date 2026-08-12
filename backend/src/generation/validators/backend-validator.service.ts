@@ -32,7 +32,13 @@ export class BackendValidatorService {
     });
 
     if (result.exitCode !== 0 || result.timedOut) {
-      return { passed: false, errorLog: result.stderr || result.stdout };
+      // Fix kritikal (postmortem: berkali-kali debugging cuma lihat warning
+      // npm, TIDAK PERNAH lihat error tsc/build sungguhan). stderr || stdout
+      // itu SALAH — stderr HAMPIR SELALU non-empty (npm cetak deprecation
+      // warning ke stderr), jadi stdout (tempat error tsc/npm run build
+      // paling mungkin muncul) SELALU dibuang total, apapun isinya. Gabung
+      // keduanya, jangan pilih salah satu.
+      return { passed: false, errorLog: [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n') };
     }
     return { passed: true };
   }

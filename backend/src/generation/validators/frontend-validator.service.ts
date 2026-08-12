@@ -19,7 +19,8 @@ export class FrontendValidatorService {
     });
 
     if (result.exitCode !== 0 || result.timedOut) {
-      return { passed: false, errorLog: result.stderr || result.stdout };
+      // Fix sama dengan backend-validator.service.ts — lihat komentar di sana.
+      return { passed: false, errorLog: [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n') };
     }
     return { passed: true };
   }
