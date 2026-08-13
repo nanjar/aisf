@@ -186,7 +186,7 @@ export class FrontendGenService {
             dependencyFiles,
           }),
           promptVersion: FRONTEND_FILE_PROMPT_VERSION,
-          maxTokens: 8192,
+          maxTokens: 16384, // dinaikkan dari 8192, sama alasan dengan backend-gen.service.ts
         });
         totalInputTokens += response.inputTokens;
         totalOutputTokens += response.outputTokens;
@@ -285,7 +285,7 @@ export class FrontendGenService {
               systemPrompt: buildRepairSystemPrompt({ path }),
               userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog: validation.errorLog ?? '' }),
               promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
-              maxTokens: 8192,
+              maxTokens: 16384,
             });
             totalInputTokens += repairResponse.inputTokens;
             totalOutputTokens += repairResponse.outputTokens;

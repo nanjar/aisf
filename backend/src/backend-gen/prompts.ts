@@ -84,7 +84,13 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   tidak ada penjelasan di luar isi file.
 - Kode harus konsisten dengan file-file dependency yang dilampirkan di bawah
   (nama export, signature method, nama field DTO, dst HARUS sama persis).
-- Jangan pernah memotong output di tengah.`;
+- Jangan pernah memotong output di tengah.
+- JAGA FILE TETAP FOKUS DAN RINGKAS (postmortem: file sampai 900-1300+ baris
+  kepotong karena kepanjangan). Kalau satu file mulai terasa terlalu besar
+  (>400-500 baris), itu tanda tanggung jawabnya kelewat banyak — idealnya
+  dipecah jadi beberapa file lebih kecil di MANIFEST (bukan sekarang, tapi
+  jadi catatan buat manifest berikutnya). Untuk sekarang: hindari komentar
+  panjang, hindari boilerplate berulang, fokus ke implementasi inti saja.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
   const packageJsonHint =

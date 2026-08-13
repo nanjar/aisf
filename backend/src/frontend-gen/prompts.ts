@@ -85,7 +85,11 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
 - Kode harus konsisten dengan file dependency yang dilampirkan (nama export,
   props, dst HARUS sama persis) dan dengan Backend API Contract (nama
   endpoint, method, request/response shape).
-- Jangan pernah memotong output di tengah.`;
+- Jangan pernah memotong output di tengah.
+- JAGA FILE TETAP FOKUS DAN RINGKAS (postmortem: file bisa kepotong kalau
+  kepanjangan). Kalau satu file mulai terasa terlalu besar (>400-500 baris),
+  fokus ke implementasi inti, hindari komentar panjang dan boilerplate
+  berulang.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
   const packageJsonHint =

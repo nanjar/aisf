@@ -212,7 +212,7 @@ export class BackendGenService {
             dependencyFiles,
           }),
           promptVersion: BACKEND_FILE_PROMPT_VERSION,
-          maxTokens: 8192,
+          maxTokens: 16384, // dinaikkan dari 8192 - postmortem truncation file 900-1300+ baris (date.util.ts, reports.service.ts, dst)
         });
         totalInputTokens += response.inputTokens;
         totalOutputTokens += response.outputTokens;
@@ -311,7 +311,7 @@ export class BackendGenService {
               systemPrompt: buildRepairSystemPrompt({ path }),
               userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog: validation.errorLog ?? '' }),
               promptVersion: BACKEND_REPAIR_PROMPT_VERSION,
-              maxTokens: 8192,
+              maxTokens: 16384,
             });
             totalInputTokens += repairResponse.inputTokens;
             totalOutputTokens += repairResponse.outputTokens;
