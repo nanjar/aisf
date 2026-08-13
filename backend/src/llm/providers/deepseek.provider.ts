@@ -12,6 +12,18 @@ import {
  * DeepSeek provider (§29 PRD V1.3). Endpoint DeepSeek OpenAI-compatible
  * ("/chat/completions"), jadi provider OpenAI-compatible generik lain nanti
  * bisa banyak reuse struktur request/response ini.
+ *
+ * PENTING (Agustus 2026): nama model legacy "deepseek-chat"/"deepseek-reasoner"
+ * resmi di-retire 24 Juli 2026 — selama masa transisi otomatis diarahkan ke
+ * "deepseek-v4-flash" (non-thinking/thinking), tapi status alias ini makin
+ * tidak konsisten. Default sekarang eksplisit "deepseek-v4-flash" — SAMA
+ * PERSIS model yang sudah kita pakai selama ini lewat alias lama, BUKAN
+ * downgrade. Satu beda penting: V4 defaultnya THINKING MODE AKTIF (beda dari
+ * alias lama yang selalu non-thinking) — kalau dibiarkan default, respons
+ * jadi lebih lambat/mahal DAN parameter `temperature` diam-diam tidak
+ * berpengaruh sama sekali (§thinking_mode docs: thinking mode tidak dukung
+ * temperature/top_p/dst). thinking:{type:'disabled'} WAJIB dikirim eksplisit
+ * supaya perilakunya identik dengan yang sudah dites sepanjang sesi ini.
  */
 @Injectable()
 export class DeepSeekProvider implements LLMProvider {
@@ -26,7 +38,7 @@ export class DeepSeekProvider implements LLMProvider {
   constructor(private readonly config: ConfigService) {
     this.apiKey = this.config.getOrThrow<string>('DEEPSEEK_API_KEY');
     this.baseUrl = this.config.get<string>('DEEPSEEK_BASE_URL', 'https://api.deepseek.com');
-    this.defaultModel = this.config.get<string>('DEEPSEEK_DEFAULT_MODEL', 'deepseek-chat');
+    this.defaultModel = this.config.get<string>('DEEPSEEK_DEFAULT_MODEL', 'deepseek-v4-flash');
     this.timeoutMs = Number(this.config.get<string>('LLM_TIMEOUT_MS', '120000'));
   }
 
@@ -45,6 +57,9 @@ export class DeepSeekProvider implements LLMProvider {
           ],
           max_tokens: request.maxTokens ?? 8192,
           temperature: request.temperature ?? 0.2,
+          // Wajib eksplisit — lihat komentar kelas di atas. Tanpa ini, model
+          // V4 (bukan alias legacy) default-nya thinking mode AKTIF.
+          thinking: { type: 'disabled' },
         },
         {
           headers: {
