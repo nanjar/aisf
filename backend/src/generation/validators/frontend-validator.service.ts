@@ -15,12 +15,21 @@ export class FrontendValidatorService {
       workdir,
       network: 'bridge',
       timeoutMs: 15 * 60_000,
-      command: ['sh', '-c', 'npm install --no-audit --no-fund && npx tsc --noEmit && npm run build'],
+      // Fix diagnostik — sama dengan backend-validator.service.ts.
+      command: [
+        'sh', '-c',
+        'set -e; ' +
+        'echo "=== STEP 1: npm install ==="; npm install --no-audit --no-fund; ' +
+        'echo "=== STEP 2: tsc --noEmit ==="; npx tsc --noEmit; ' +
+        'echo "=== STEP 3: npm run build ==="; npm run build; ' +
+        'echo "=== SEMUA STEP LOLOS ==="',
+      ],
     });
 
     if (result.exitCode !== 0 || result.timedOut) {
       // Fix sama dengan backend-validator.service.ts — lihat komentar di sana.
-      return { passed: false, errorLog: [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n') };
+      const combined = [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n');
+      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]` };
     }
     return { passed: true };
   }

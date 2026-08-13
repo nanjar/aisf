@@ -28,7 +28,21 @@ export class BackendValidatorService {
       workdir,
       network: 'bridge',
       timeoutMs: 15 * 60_000,
-      command: ['sh', '-c', 'npm install --no-audit --no-fund && npx tsc --noEmit && npm run build'],
+      // Fix diagnostik (postmortem: gagal tanpa satu baris "npm error" pun,
+      // tidak jelas step mana yang gagal — npm install, tsc, atau build).
+      // Tambah marker eksplisit SEBELUM tiap step + exit code tiap step,
+      // supaya kalau error text-nya sendiri ambigu/kepotong, minimal jelas
+      // STEP MANA yang lagi jalan waktu gagal (marker terakhir yang muncul
+      // = step yang gagal, karena `set -e` langsung stop begitu 1 command
+      // exit non-zero).
+      command: [
+        'sh', '-c',
+        'set -e; ' +
+        'echo "=== STEP 1: npm install ==="; npm install --no-audit --no-fund; ' +
+        'echo "=== STEP 2: tsc --noEmit ==="; npx tsc --noEmit; ' +
+        'echo "=== STEP 3: npm run build ==="; npm run build; ' +
+        'echo "=== SEMUA STEP LOLOS ==="',
+      ],
     });
 
     if (result.exitCode !== 0 || result.timedOut) {
@@ -38,7 +52,10 @@ export class BackendValidatorService {
       // warning ke stderr), jadi stdout (tempat error tsc/npm run build
       // paling mungkin muncul) SELALU dibuang total, apapun isinya. Gabung
       // keduanya, jangan pilih salah satu.
-      return { passed: false, errorLog: [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n') };
+      const combined = [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n');
+      // Exit code eksplisit ditaruh PALING AKHIR — selalu selamat dari
+      // slice(-N) di layer atasnya (backend-gen.service.ts), berapa pun N-nya.
+      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]` };
     }
     return { passed: true };
   }
