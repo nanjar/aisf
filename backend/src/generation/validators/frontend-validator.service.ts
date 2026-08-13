@@ -29,7 +29,12 @@ export class FrontendValidatorService {
     if (result.exitCode !== 0 || result.timedOut) {
       // Fix sama dengan backend-validator.service.ts — lihat komentar di sana.
       const combined = [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n');
-      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]` };
+      const stepMarkers = [...combined.matchAll(/=== STEP (\d): ([^=]+) ===/g)];
+      const lastStep = stepMarkers.at(-1);
+      const stepSummary = lastStep
+        ? `Step terakhir yang MULAI dijalankan sebelum gagal: STEP ${lastStep[1]} (${lastStep[2].trim()})`
+        : 'Tidak ada satupun STEP marker ditemukan — kemungkinan gagal sebelum step 1 (npm install) sempat mulai sama sekali.';
+      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]\n[${stepSummary}]` };
     }
     return { passed: true };
   }

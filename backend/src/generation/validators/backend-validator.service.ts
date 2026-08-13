@@ -53,9 +53,21 @@ export class BackendValidatorService {
       // paling mungkin muncul) SELALU dibuang total, apapun isinya. Gabung
       // keduanya, jangan pilih salah satu.
       const combined = [result.stdout, result.stderr].filter(Boolean).join('\n\n--- stderr ---\n\n');
-      // Exit code eksplisit ditaruh PALING AKHIR — selalu selamat dari
-      // slice(-N) di layer atasnya (backend-gen.service.ts), berapa pun N-nya.
-      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]` };
+
+      // Fix diagnostik lanjutan (postmortem #2: marker '=== STEP N ===' juga
+      // kepotong karena letaknya di AWAL output, sementara warning npm
+      // deprecated saja sudah > 4000 karakter — marker ke-dorong keluar
+      // jendela slice(-N) di layer atasnya). Deteksi step tertinggi yang
+      // tercapai DARI FULL output (sebelum dipotong), taruh ringkasannya
+      // eksplisit di posisi PALING AKHIR — itu satu-satunya posisi yang
+      // pasti selamat dari slice(-N) berapa pun ukurannya.
+      const stepMarkers = [...combined.matchAll(/=== STEP (\d): ([^=]+) ===/g)];
+      const lastStep = stepMarkers.at(-1);
+      const stepSummary = lastStep
+        ? `Step terakhir yang MULAI dijalankan sebelum gagal: STEP ${lastStep[1]} (${lastStep[2].trim()})`
+        : 'Tidak ada satupun STEP marker ditemukan — kemungkinan gagal sebelum step 1 (npm install) sempat mulai sama sekali.';
+
+      return { passed: false, errorLog: `${combined}\n\n[exitCode: ${result.exitCode}]\n[${stepSummary}]` };
     }
     return { passed: true };
   }

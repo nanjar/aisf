@@ -401,7 +401,7 @@ export class BackendGenService {
           data: {
             status: StageStatus.PENDING,
             artifactName: 'backend/*',
-            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-4000)}`,
+            content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-8000)}`,
             resumeUrl: dto.resumeUrl ?? null,
             generatedAt: new Date(),
           },
@@ -411,7 +411,7 @@ export class BackendGenService {
           data: {
             status: GenerationJobStatus.FAILED,
             errorCategory: 'BUILD_FAILED',
-            errorMessage: (validation.errorLog ?? '').slice(-4000),
+            errorMessage: (validation.errorLog ?? '').slice(-8000),
             completedAt: new Date(),
           },
         });
