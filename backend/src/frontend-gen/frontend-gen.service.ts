@@ -149,9 +149,15 @@ export class FrontendGenService {
       totalTokens += manifestResponse.totalTokens;
       lastModel = manifestResponse.model;
 
-      const { entries: manifestEntries, errors: manifestErrors } = parseManifest(stripCodeFence(manifestResponse.content));
+      const cleanManifestContent = stripCodeFence(manifestResponse.content);
+      const { entries: manifestEntries, errors: manifestErrors } = parseManifest(cleanManifestContent);
       if (manifestErrors.length > 0) {
-        return await this.failJob(frontendStage.id, job.id, 'MANIFEST_INCOMPLETE', manifestErrors.join('; '));
+        return await this.failJob(
+          frontendStage.id,
+          job.id,
+          'MANIFEST_INCOMPLETE',
+          `${manifestErrors.join('; ')}\n\n--- Cuplikan respons mentah LLM (800 karakter pertama) ---\n${cleanManifestContent.slice(0, 800)}`,
+        );
       }
       const entries = reorderByDependencies(manifestEntries);
 

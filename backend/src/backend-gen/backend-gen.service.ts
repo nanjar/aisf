@@ -167,13 +167,19 @@ export class BackendGenService {
       totalTokens += manifestResponse.totalTokens;
       lastModel = manifestResponse.model;
 
-      const { entries: manifestEntries, errors: manifestErrors } = parseManifest(stripCodeFence(manifestResponse.content));
+      const cleanManifestContent = stripCodeFence(manifestResponse.content);
+      const { entries: manifestEntries, errors: manifestErrors } = parseManifest(cleanManifestContent);
       if (manifestErrors.length > 0) {
+        // Fix diagnostik (postmortem: 'Manifest bukan JSON valid dan tidak
+        // bisa diperbaiki' - tidak pernah bisa lihat KENAPA karena raw
+        // response LLM tidak pernah disimpan di manapun). Sekarang sertakan
+        // cuplikan mentahnya di error_message supaya bisa didiagnosis tanpa
+        // perlu trigger ulang generation lagi cuma buat lihat isinya.
         return await this.failJob(
           backendStage.id,
           job.id,
           'MANIFEST_INCOMPLETE',
-          manifestErrors.join('; '),
+          `${manifestErrors.join('; ')}\n\n--- Cuplikan respons mentah LLM (800 karakter pertama) ---\n${cleanManifestContent.slice(0, 800)}`,
         );
       }
       // Urutan array manifest dari LLM cuma dioptimalkan supaya file wajib
