@@ -22,6 +22,15 @@ Manifest HARUS mencakup:
   "actions" di setiap screen pada UI/UX Design Specification. Jangan sampai
   ada action UI yang tidak punya endpoint pendukung.
 - Skema harus konsisten dengan Database Design yang sudah disetujui.
+- WAJIB ada file enum/type/interface TERPUSAT untuk setiap konsep yang
+  dipakai LEBIH DARI 1 file (mis. role user, status order, dst) — taruh di
+  src/common/enums/ atau src/common/interfaces/. File lain WAJIB import dari
+  situ, JANGAN pernah define ulang tipe yang sama secara inline/duplikat di
+  file lain (postmortem nyata: auth.service.ts import "UserRole" dari
+  src/common/enums/user-role.enum.ts yang TIDAK PERNAH masuk manifest sama
+  sekali — build gagal total "Cannot find module"). Sebelum finalisasi
+  manifest, WAJIB cek ulang: setiap enum/type yang akan di-import di file
+  manapun HARUS punya entry file tersendiri di manifest ini.
 
 ATURAN KETAT OUTPUT:
 - Balas HANYA dengan satu JSON array valid, TIDAK ADA teks lain di luar JSON,
@@ -84,13 +93,25 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   tidak ada penjelasan di luar isi file.
 - Kode harus konsisten dengan file-file dependency yang dilampirkan di bawah
   (nama export, signature method, nama field DTO, dst HARUS sama persis).
+- JANGAN import dari path manapun yang TIDAK ADA di "Manifest lengkap" yang
+  dilampirkan (postmortem nyata: file import enum dari path yang tidak
+  pernah masuk manifest sama sekali — build gagal "Cannot find module").
+  Kalau butuh tipe/enum yang belum kelihatan di file dependency yang
+  dilampirkan, cek dulu manifest overview — kalau ada file yang cocok
+  (mis. src/common/enums/xxx.enum.ts), import dari situ PERSIS sesuai path
+  di manifest. Kalau benar-benar tidak ada file yang cocok di manifest,
+  define tipe itu inline di file ini sendiri (JANGAN mengarang path import
+  ke file yang tidak ada).
 - Jangan pernah memotong output di tengah.
-- JAGA FILE TETAP FOKUS DAN RINGKAS (postmortem: file sampai 900-1300+ baris
-  kepotong karena kepanjangan). Kalau satu file mulai terasa terlalu besar
-  (>400-500 baris), itu tanda tanggung jawabnya kelewat banyak — idealnya
-  dipecah jadi beberapa file lebih kecil di MANIFEST (bukan sekarang, tapi
-  jadi catatan buat manifest berikutnya). Untuk sekarang: hindari komentar
-  panjang, hindari boilerplate berulang, fokus ke implementasi inti saja.`;
+- BATAS KERAS: MAKSIMAL 300 BARIS untuk file ini, TIDAK BOLEH LEBIH (postmortem
+  fatal: file 900-1300+ baris SELALU kepotong di titik yang sama persis
+  walau maxTokens dinaikkan berkali-kali — bukti ini BUKAN soal batas token,
+  file-nya sendiri yang harus lebih kecil). Kalau fungsi/logic yang diminta
+  butuh lebih dari 300 baris untuk diimplementasikan lengkap: JANGAN paksa
+  muat semua — implementasikan BAGIAN INTI/PALING PENTING saja secara utuh
+  dan benar, lalu tambahkan komentar TODO singkat untuk sisanya. File yang
+  300 baris tapi BENAR dan lengkap-secara-compile jauh lebih baik daripada
+  file 1300 baris yang kepotong dan gagal total.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
   const packageJsonHint =
