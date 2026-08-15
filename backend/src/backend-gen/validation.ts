@@ -93,7 +93,11 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
       continue;
     }
     if (seenPaths.has(obj.path)) {
-      errors.push(`Manifest punya duplikat path: ${obj.path}`);
+      // Fix (postmortem: manifest valid tapi digagalkan total gara-gara
+      // duplikat path). Duplikat path itu HARMLESS - entry pertama tetap
+      // dipakai (continue di bawah sudah skip yang duplikat), TIDAK PERLU
+      // jadi error fatal yang menggagalkan seluruh manifest. Cukup log,
+      // jangan push ke errors[].
       continue;
     }
     seenPaths.add(obj.path);
