@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import axios from 'axios';
-import { OrgRole, ProjectStatus, StageKey, StageStatus } from '@prisma/client';
+import { OrgRole, ProjectStatus, StageKey, StageStatus, ValidationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DecideStageDto, AssignStageDto, SetDeadlineDto } from './dto/decide-stage.dto';
 
@@ -22,7 +22,6 @@ interface CallerContext {
 export class StagesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** V1.2 FR-801 — Assign Approver per Stage, sekarang ke member ATAU ke team. */
   async assign(projectId: string, stageKey: StageKey, dto: AssignStageDto, assignedBy: string) {
     const hasMember = Boolean(dto.assignedMemberId);
     const hasTeam = Boolean(dto.assignedTeamId);
@@ -57,7 +56,6 @@ export class StagesService {
     });
   }
 
-  /** V1.2 FR-803 — Set Stage Deadline */
   setDeadline(projectId: string, stageKey: StageKey, dto: SetDeadlineDto) {
     return this.prisma.artifactStage.update({
       where: { projectId_stageKey: { projectId, stageKey } },
@@ -65,7 +63,6 @@ export class StagesService {
     });
   }
 
-  /** V1.2 FR-1203 — revision history untuk satu stage */
   async revisions(projectId: string, stageKey: StageKey) {
     const stage = await this.prisma.artifactStage.findUniqueOrThrow({
       where: { projectId_stageKey: { projectId, stageKey } },
@@ -76,11 +73,6 @@ export class StagesService {
     });
   }
 
-  /**
-   * §9 PRD V1.2 — Approve / Reject / Request Revision. Satu-satunya tempat
-   * yang boleh memanggil resumeUrl n8n, sekarang juga satu-satunya tempat
-   * yang menegakkan permission per-stage (§7.1), termasuk assignment ke team.
-   */
   async decide(projectId: string, stageKey: StageKey, dto: DecideStageDto, caller: CallerContext) {
     const stage = await this.prisma.artifactStage.findUnique({
       where: { projectId_stageKey: { projectId, stageKey } },
@@ -92,6 +84,16 @@ export class StagesService {
         `Stage ini berstatus "${stage.status}" — tidak bisa diputuskan lagi.`,
       );
     }
+
+    // A terminal validation failure must never become human-approvable merely
+    // because the stage retains the legacy GENERATED status. n8n must stop its
+    // retry loop when canSelfHeal=false; this is the backend safety gate.
+    if (stage.failedValidation || stage.validationStatus === ValidationStatus.FAILED) {
+      throw new ConflictException(
+        `Stage ${stageKey} gagal validasi dan tidak dapat di-approve. Retry/self-healing sudah habis atau membutuhkan revision.`,
+      );
+    }
+
     if (!stage.resumeUrl) {
       throw new ConflictException('Stage ini belum punya resume URL dari n8n. Coba lagi sebentar.');
     }
@@ -153,13 +155,6 @@ export class StagesService {
     return updated;
   }
 
-  /**
-   * §7.1 permission check:
-   *  - OWNER/ADMIN: selalu boleh (fallback approver).
-   *  - MEMBER: boleh kalau (a) di-assign langsung sebagai member, ATAU
-   *            (b) dia anggota dari TEAM yang di-assign ke stage ini.
-   *  - VIEWER: tidak pernah boleh.
-   */
   private async assertCanDecide(projectId: string, stageKey: StageKey, caller: CallerContext) {
     if (caller.role === OrgRole.OWNER || caller.role === OrgRole.ADMIN) return;
     if (caller.role === OrgRole.VIEWER) {
