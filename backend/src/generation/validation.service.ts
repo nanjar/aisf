@@ -8,7 +8,7 @@ import { DatabaseValidatorService } from './validators/database-validator.servic
 import { StageKey, StageStatus, ValidationStatus } from '@prisma/client';
 import { ValidateStagePayload, ValidationResult } from './types';
 
-const MAX_SELF_HEALING_ATTEMPTS = 3; // §11.4 PRD V1.2
+const MAX_SELF_HEALING_ATTEMPTS = 3;
 
 @Injectable()
 export class ValidationService {
@@ -20,12 +20,6 @@ export class ValidationService {
     private readonly databaseValidator: DatabaseValidatorService,
   ) {}
 
-  /**
-   * Dipanggil node "Validate <Nama>" di n8n setelah generation file-by-file
-   * selesai. Balikan ini yang menentukan n8n lanjut (passed), masuk loop
-   * Self-Heal (canSelfHeal), atau menyerah dan lanjut dengan flag peringatan
-   * (attempts habis).
-   */
   async validateStage(payload: ValidateStagePayload) {
     const stage = await this.prisma.artifactStage.findUnique({
       where: { projectId_stageKey: { projectId: payload.projectId, stageKey: payload.stageKey as StageKey } },
@@ -42,25 +36,62 @@ export class ValidationService {
     if (result.passed) {
       await this.prisma.artifactStage.update({
         where: { id: stage.id },
-        data: { status: StageStatus.GENERATED, validationStatus: ValidationStatus.PASSED },
+        data: {
+          status: StageStatus.GENERATED,
+          validationStatus: ValidationStatus.PASSED,
+          failedValidation: false,
+        },
       });
-      return { passed: true, canSelfHeal: false };
+      return {
+        passed: true,
+        canSelfHeal: false,
+        attempts: stage.selfHealingAttempts,
+        affectedFiles: [],
+      };
     }
 
-    const attempts = stage.selfHealingAttempts + 1;
-    const canSelfHeal = attempts <= MAX_SELF_HEALING_ATTEMPTS;
-
-    await this.prisma.artifactStage.update({
-      where: { id: stage.id },
+    // Reserve a repair slot atomically. This prevents concurrent validation
+    // callbacks from incrementing the counter beyond the configured maximum.
+    const reserved = await this.prisma.artifactStage.updateMany({
+      where: {
+        id: stage.id,
+        selfHealingAttempts: { lt: MAX_SELF_HEALING_ATTEMPTS },
+      },
       data: {
-        status: canSelfHeal ? StageStatus.SELF_HEALING : StageStatus.GENERATED,
+        selfHealingAttempts: { increment: 1 },
+        status: StageStatus.SELF_HEALING,
         validationStatus: ValidationStatus.FAILED,
-        selfHealingAttempts: attempts,
-        failedValidation: !canSelfHeal,
+        failedValidation: false,
       },
     });
 
-    return { passed: false, canSelfHeal, errorLog: result.errorLog, attempts };
+    if (reserved.count === 1) {
+      return {
+        passed: false,
+        canSelfHeal: true,
+        errorLog: result.errorLog,
+        attempts: stage.selfHealingAttempts + 1,
+        affectedFiles: result.affectedFiles ?? [],
+      };
+    }
+
+    // No repair slot remains. This is terminal for automatic repair.
+    const current = await this.prisma.artifactStage.update({
+      where: { id: stage.id },
+      data: {
+        status: StageStatus.GENERATED,
+        validationStatus: ValidationStatus.FAILED,
+        failedValidation: true,
+      },
+    });
+
+    return {
+      passed: false,
+      canSelfHeal: false,
+      errorLog: result.errorLog,
+      attempts: current.selfHealingAttempts,
+      affectedFiles: result.affectedFiles ?? [],
+    };
   }
 
   private async runValidator(
@@ -79,11 +110,22 @@ export class ValidationService {
 
     const dir = await this.sandbox.materialize(artifactStageId, version);
     try {
-      return stageKey === 'BACKEND'
+      const result = stageKey === 'BACKEND'
         ? await this.backendValidator.validate(dir)
         : await this.frontendValidator.validate(dir);
+      return { ...result, affectedFiles: this.extractAffectedFiles(result.errorLog) };
     } finally {
       await this.sandbox.cleanup(dir);
     }
+  }
+
+  private extractAffectedFiles(errorLog?: string): string[] {
+    if (!errorLog) return [];
+    const files = new Set<string>();
+    const tsPattern = /(?:^|\n)([^\n:(]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\):\s*(?:error|warning)\s+TS\d+/g;
+    for (const match of errorLog.matchAll(tsPattern)) files.add(match[1].trim());
+    const colonPattern = /(?:^|\n)([^\n:]+\.(?:ts|tsx|js|jsx)):\d+:\d+\s*[-:]?/g;
+    for (const match of errorLog.matchAll(colonPattern)) files.add(match[1].trim());
+    return [...files];
   }
 }
