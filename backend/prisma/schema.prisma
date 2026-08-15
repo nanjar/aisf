@@ -43,13 +43,11 @@ enum StageKey {
   PACKAGE
 }
 
-// V1.1: cara user login. Google user tidak selalu punya passwordHash.
 enum AuthProvider {
   LOCAL
   GOOGLE
 }
 
-// V1.2: role level organisasi (§7 PRD V1.2)
 enum OrgRole {
   OWNER
   ADMIN
@@ -78,21 +76,13 @@ enum ReminderType {
 model User {
   id           String       @id @default(uuid())
   email        String       @unique
-  // V1.1: nullable — user yang login lewat Google tidak punya password lokal
   passwordHash String?      @map("password_hash")
-  // V1.1: nama tampilan, diisi dari profil Google (atau null untuk user lokal lama)
   name         String?
-  // V1.1: id akun Google, unik jika terisi
   googleId     String?      @unique @map("google_id")
   authProvider AuthProvider @default(LOCAL) @map("auth_provider")
-  // BUGFIX bahasa V1.1: kolom ini sebelumnya tidak pernah dibuat meski sudah
-  // disebut di Dokumentasi V1.1 §5.1. Switching langsung di UI TIDAK
-  // bergantung pada kolom ini (itu localStorage, lihat frontend/src/lib/i18n)
-  // — ini hanya untuk preferensi lintas-device/re-login.
   preferredLanguage String  @default("id") @map("preferred_language")
   createdAt    DateTime     @default(now()) @map("created_at")
 
-  // V1.2
   ownedOrganizations  Organization[]        @relation("OrgOwner")
   memberships         OrganizationMember[]
   createdProjects     Project[]             @relation("ProjectCreatedBy")
@@ -100,10 +90,6 @@ model User {
 
   @@map("users")
 }
-
-// ---------------------------------------------------------------
-// V1.2 — Organization, Team, Membership (§6 PRD V1.2)
-// ---------------------------------------------------------------
 
 model Organization {
   id        String   @id @default(uuid())
@@ -162,7 +148,7 @@ model TeamMember {
   id                   String   @id @default(uuid())
   teamId               String   @map("team_id")
   organizationMemberId String   @map("organization_member_id")
-  jobTitle             String?  @map("job_title") // mis. "Backend Lead", "QA Lead"
+  jobTitle             String?  @map("job_title")
   createdAt            DateTime @default(now()) @map("created_at")
 
   team   Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -172,10 +158,6 @@ model TeamMember {
   @@index([teamId])
   @@map("team_members")
 }
-
-// ---------------------------------------------------------------
-// Project & Pipeline (existing model, extended for V1.2)
-// ---------------------------------------------------------------
 
 model Project {
   id              String        @id @default(uuid())
@@ -188,13 +170,10 @@ model Project {
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
-  // V1.2 — nullable for now to avoid breaking any existing project rows;
-  // see migration note in README-v1.2-patch.md before enforcing NOT NULL.
   organizationId String?       @map("organization_id")
   organization   Organization? @relation(fields: [organizationId], references: [id])
   createdById    String?       @map("created_by_id")
   createdBy      User?         @relation("ProjectCreatedBy", fields: [createdById], references: [id])
-  // S3 folder root is users/{createdById}/projects/{id}/... — see StorageService.
   deadlineAt     DateTime?     @map("deadline_at")
 
   stages           ArtifactStage[]
@@ -211,26 +190,21 @@ model ArtifactStage {
   project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   stageKey     StageKey    @map("stage_key")
   artifactName String?     @map("artifact_name")
-  // DEPRECATED as the primary payload once ArtifactObject/S3 is wired up
-  // (this batch adds the column below but the storage module itself is a
-  // follow-up patch) — kept NOT removed so existing rows stay readable.
   content      String?
   status       StageStatus @default(PENDING)
   resumeUrl    String?     @map("resume_url")
   comment      String?
-  decidedBy    String?     @map("decided_by") // legacy: free-text email, kept for backward compat
-  decidedById  String?     @map("decided_by_id") // V1.2: proper FK once caller passes a userId
+  decidedBy    String?     @map("decided_by")
+  decidedById  String?     @map("decided_by_id")
   decidedByUser User?      @relation("StageDecidedBy", fields: [decidedById], references: [id])
   generatedAt  DateTime?   @map("generated_at")
   decidedAt    DateTime?   @map("decided_at")
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  // V1.2 — governance (§7, §8 PRD V1.2)
   deadlineAt            DateTime? @map("deadline_at")
   overdueAt             DateTime? @map("overdue_at")
   revisionCount         Int       @default(0) @map("revision_count")
-  // V1.2 — reliable generation (§11 PRD V1.2)
   validationStatus      ValidationStatus @default(PENDING) @map("validation_status")
   selfHealingAttempts   Int              @default(0) @map("self_healing_attempts")
   failedValidation      Boolean          @default(false) @map("failed_validation")
@@ -244,16 +218,10 @@ model ArtifactStage {
   @@map("artifact_stages")
 }
 
-// ---------------------------------------------------------------
-// V1.2 — Stage Assignment & Revision (§7, §9 PRD V1.2)
-// ---------------------------------------------------------------
-
 model StageAssignment {
   id               String   @id @default(uuid())
   projectId        String   @map("project_id")
   stageKey         StageKey @map("stage_key")
-  // V1.2 (team assignment): salah satu dari dua ini terisi, tidak keduanya/kosong
-  // (ditegakkan di StagesService, plus CHECK constraint di database).
   assignedMemberId String?  @map("assigned_member_id")
   assignedTeamId   String?  @map("assigned_team_id")
   assignedBy       String   @map("assigned_by")
@@ -284,22 +252,16 @@ model RevisionRequest {
   @@map("revision_requests")
 }
 
-// ---------------------------------------------------------------
-// V1.2 — Object Storage Metadata (§10 PRD V1.2)
-// Storage module itself (S3 client) is a separate follow-up patch — this
-// table exists now so ArtifactStage relations are already in place.
-// ---------------------------------------------------------------
-
 model ArtifactObject {
   id              String   @id @default(uuid())
   artifactStageId String   @map("artifact_stage_id")
-  fileName        String   @map("file_name") // e.g. "src/main.ts" or "PRD.md"
-  storageProvider String   @map("storage_provider") // "minio" | "s3" | "r2" | "wasabi"
+  fileName        String   @map("file_name")
+  storageProvider String   @map("storage_provider")
   bucket          String
-  objectKey       String   @map("object_key")
+  objectKey       String   @unique @map("object_key")
   size            Int
   mimeType        String   @map("mime_type")
-  checksum        String   // sha256 hex
+  checksum        String
   version         Int      @default(1)
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -309,10 +271,6 @@ model ArtifactObject {
   @@index([artifactStageId, fileName, version])
   @@map("artifact_objects")
 }
-
-// ---------------------------------------------------------------
-// V1.2 — Deadline Reminder (§5 PRD V1.2)
-// ---------------------------------------------------------------
 
 model ReminderLog {
   id              String       @id @default(uuid())
