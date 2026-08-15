@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DeepSeekProvider } from './providers/deepseek.provider';
 import { QwenProvider } from './providers/qwen.provider';
+import { GeminiProvider } from './providers/gemini.provider';
 import { GenerationRequest, GenerationResponse, LLMProvider } from './types';
 
 /**
@@ -9,7 +10,7 @@ import { GenerationRequest, GenerationResponse, LLMProvider } from './types';
  *
  * Generation engine (Fase 3) dan agent-agent lain HANYA boleh depend on
  * LLMService, tidak pernah langsung ke DeepSeekProvider atau axios. Untuk
- * menambah provider baru (mis. OpenAI-compatible generik, Qwen):
+ * menambah provider baru (mis. OpenAI-compatible generik, Qwen, Gemini):
  *   1. Buat class baru di providers/ yang implement LLMProvider
  *   2. Daftarkan di constructor providers map di bawah
  *   3. Selesai — tidak ada perubahan lain di luar folder llm/
@@ -23,10 +24,12 @@ export class LLMService {
     private readonly config: ConfigService,
     deepseek: DeepSeekProvider,
     qwen: QwenProvider,
+    gemini: GeminiProvider,
   ) {
     this.providers = new Map<string, LLMProvider>([
       [deepseek.name, deepseek],
       [qwen.name, qwen],
+      [gemini.name, gemini],
     ]);
     this.defaultProviderName = this.config.get<string>('LLM_DEFAULT_PROVIDER', 'deepseek');
   }
