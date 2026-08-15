@@ -53,10 +53,9 @@ export class StorageService {
     const objectKey = this.buildKey(input.createdById, input.projectId, version, namespacedFileName);
     const checksum = createHash('sha256').update(input.content).digest('hex');
 
-    // S3 PUT is idempotent for the deterministic object key above. Remove the
-    // previous metadata row for the same artifact key before inserting the new
-    // snapshot so repeated retries cannot accumulate duplicate ArtifactObject
-    // rows for one logical file/version.
+    // The object key is deterministic for (project, stage, version, file).
+    // S3 PUT replaces the object, and the unique DB key makes the metadata
+    // record idempotent as well.
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -66,10 +65,19 @@ export class StorageService {
       }),
     );
 
-    await this.prisma.artifactObject.deleteMany({ where: { objectKey } });
-
-    return this.prisma.artifactObject.create({
-      data: {
+    return this.prisma.artifactObject.upsert({
+      where: { objectKey },
+      update: {
+        artifactStageId: input.artifactStageId,
+        fileName: input.fileName,
+        storageProvider: this.provider,
+        bucket: this.bucket,
+        size: input.content.byteLength,
+        mimeType: input.mimeType,
+        checksum,
+        version,
+      },
+      create: {
         artifactStageId: input.artifactStageId,
         fileName: input.fileName,
         storageProvider: this.provider,
