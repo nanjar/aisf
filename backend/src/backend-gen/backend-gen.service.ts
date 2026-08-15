@@ -378,7 +378,7 @@ export class BackendGenService {
             status: StageStatus.GENERATED,
             artifactName: 'backend/*',
             content: summary,
-            resumeUrl: dto.resumeUrl ?? null,
+            ...(dto.resumeUrl !== undefined ? { resumeUrl: dto.resumeUrl } : {}),
             generatedAt: new Date(),
           },
         });
@@ -403,7 +403,7 @@ export class BackendGenService {
             status: StageStatus.PENDING,
             artifactName: 'backend/*',
             content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-8000)}`,
-            resumeUrl: dto.resumeUrl ?? null,
+            ...(dto.resumeUrl !== undefined ? { resumeUrl: dto.resumeUrl } : {}),
             generatedAt: new Date(),
           },
         });

@@ -39,7 +39,7 @@ export interface DockerRunResult {
 export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult> {
   const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
   const containerName = `asf-validate-${randomUUID()}`;
-
+console.log(`[dockerRun] CREATE ${containerName}`);
   const create = await execDocker([
     'create',
     '--name', containerName,
@@ -58,12 +58,22 @@ export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult
 
   try {
     const cp = await execDocker(['cp', `${opts.workdir}/.`, `${containerName}:/workspace`]);
-    if (cp.exitCode !== 0) {
+console.log(`[dockerRun] CREATED ${containerName} exitCode=${create.exitCode}`);    
+if (cp.exitCode !== 0) {
       return { exitCode: -1, stdout: '', stderr: `[docker cp]\n${cp.stderr || cp.stdout}`, timedOut: false };
     }
-
+console.log(`[dockerRun] START ${containerName} timeout=${timeoutMs}ms`);
     const start = await execDocker(['start', '-a', containerName], timeoutMs);
+console.log(
+  `[dockerRun] DONE ${containerName} exitCode=${start.exitCode} timedOut=${start.timedOut}`,
+);
+if (start.stdout) {
+  console.log(`[dockerRun] STDOUT ${containerName}\n${start.stdout}`);
+}
 
+if (start.stderr) {
+  console.error(`[dockerRun] STDERR ${containerName}\n${start.stderr}`);
+}
     // Label eksplisit ditaruh di AKHIR (bukan awal) — errorMessage yang
     // disimpan di database di-slice(-4000) (ambil bagian AKHIR teks, lihat
     // fix sebelumnya soal error kepotong di awal). Kalau label ini ditaruh
@@ -81,7 +91,8 @@ export async function dockerRun(opts: DockerRunOptions): Promise<DockerRunResult
   } finally {
     // Cleanup selalu dijalankan, terlepas dari hasil di atas — container
     // yang lupa dihapus bisa numpuk dan habiskan disk host lama-lama.
-    await execDocker(['rm', '-f', containerName]).catch(() => undefined);
+console.log(`[dockerRun] CLEANUP ${containerName}`);   
+ await execDocker(['rm', '-f', containerName]).catch(() => undefined);
   }
 }
 
