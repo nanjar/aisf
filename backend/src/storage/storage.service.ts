@@ -56,19 +56,29 @@ export class StorageService {
       ContentType: input.mimeType,
     }));
 
-    return this.prisma.artifactObject.upsert({
-      where: { objectKey },
-      update: {
-        artifactStageId: input.artifactStageId,
-        fileName: input.fileName,
-        storageProvider: this.provider,
-        bucket: this.bucket,
-        size: input.content.byteLength,
-        mimeType: input.mimeType,
-        checksum,
-        version,
-      },
-      create: {
+    // The object key is deterministic. Reusing the same logical file/version
+    // updates its metadata instead of creating another ArtifactObject row.
+    // This remains compatible with the existing V1.3 schema (no migration
+    // required); a database unique constraint can be added later as defense-in-depth.
+    const existing = await this.prisma.artifactObject.findFirst({ where: { objectKey } });
+    if (existing) {
+      return this.prisma.artifactObject.update({
+        where: { id: existing.id },
+        data: {
+          artifactStageId: input.artifactStageId,
+          fileName: input.fileName,
+          storageProvider: this.provider,
+          bucket: this.bucket,
+          size: input.content.byteLength,
+          mimeType: input.mimeType,
+          checksum,
+          version,
+        },
+      });
+    }
+
+    return this.prisma.artifactObject.create({
+      data: {
         artifactStageId: input.artifactStageId,
         fileName: input.fileName,
         storageProvider: this.provider,
