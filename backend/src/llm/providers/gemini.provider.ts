@@ -46,6 +46,39 @@ export class GeminiProvider implements LLMProvider {
       );
     }
 
+    // Fix (postmortem: 33 file, gagal di file ke-4 dengan HTTP 429
+    // RESOURCE_EXHAUSTED — free tier Gemini dibatasi 250.000 token
+    // input/menit, terlampaui setelah beberapa panggilan beruntun karena
+    // tiap file kirim prompt besar berulang - PRD+Architecture+dst). Google
+    // sendiri bilang di pesan error "Please retry in Ns" — ini error
+    // TRANSIENT yang seharusnya otomatis pulih, bukan gagal permanen. Retry
+    // dengan backoff sebelum benar-benar menyerah.
+    const MAX_RATE_LIMIT_RETRIES = 5;
+    for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+      try {
+        return await this.doGenerate(request);
+      } catch (err) {
+        const isRateLimited = err instanceof LLMProviderError && err.message.includes('HTTP 429');
+        if (!isRateLimited || attempt === MAX_RATE_LIMIT_RETRIES) throw err;
+
+        const retryDelaySeconds = this.extractRetryDelay(err.message) ?? 10 * (attempt + 1);
+        this.logger.warn(
+          `Gemini rate limited (429), retry ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES} setelah ${retryDelaySeconds}s...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, retryDelaySeconds * 1000));
+      }
+    }
+    // Tidak akan pernah sampai sini (loop di atas selalu return atau throw), tapi TypeScript butuh ini.
+    throw new LLMProviderError('Gemini generate() gagal tanpa alasan jelas', 'LLM_ERROR', this.name);
+  }
+
+  /** Google sering sertakan "retryDelay":"6s" di body error 429 — pakai kalau ada, fallback exponential backoff. */
+  private extractRetryDelay(errorMessage: string): number | null {
+    const match = errorMessage.match(/"retryDelay":"(\d+(?:\.\d+)?)s"/);
+    return match ? Math.ceil(Number(match[1])) : null;
+  }
+
+  private async doGenerate(request: GenerationRequest): Promise<GenerationResponse> {
     const model = request.model ?? this.defaultModel;
     const startedAt = Date.now();
 
@@ -101,8 +134,7 @@ export class GeminiProvider implements LLMProvider {
 
       const axiosErr = err as AxiosError;
       const isTimeout = axiosErr.code === 'ECONNABORTED';
-      const status = axiosErr.response?.status;
-      const category = isTimeout ? 'LLM_TIMEOUT' : status === 402 || status === 429 ? 'LLM_ERROR' : 'LLM_ERROR';
+      const category = isTimeout ? 'LLM_TIMEOUT' : 'LLM_ERROR';
       const detail = axiosErr.response
         ? `HTTP ${axiosErr.response.status}: ${JSON.stringify(axiosErr.response.data)}`
         : axiosErr.message;
