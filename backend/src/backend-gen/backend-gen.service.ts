@@ -375,6 +375,7 @@ export class BackendGenService {
         await this.prisma.artifactStage.update({
           where: { id: backendStage.id },
           data: {
+            status: StageStatus.GENERATED,
             artifactName: 'backend/*',
             content: summary,
             resumeUrl: dto.resumeUrl ?? null,
@@ -444,7 +445,10 @@ export class BackendGenService {
     });
     await this.prisma.artifactStage.update({
       where: { id: artifactStageId },
-      data: { status: StageStatus.PENDING },
+      data: {
+        status: StageStatus.PENDING,
+        resumeUrl: null,
+      },
     });
   }
 
