@@ -74,7 +74,9 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
       continue;
     }
     if (seenPaths.has(obj.path)) {
-      errors.push(`Manifest punya duplikat path: ${obj.path}`);
+      // Fix (postmortem: duplikat path menggagalkan seluruh manifest yang
+      // sebenarnya valid) — entry pertama tetap dipakai (continue di bawah
+      // sudah skip duplikatnya), tidak perlu jadi error fatal.
       continue;
     }
     seenPaths.add(obj.path);
@@ -94,12 +96,16 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
     }
   }
 
+  // Fix kritikal (postmortem: 29 "X depends on Y yang tidak ada di manifest"
+  // dianggap error FATAL, menggagalkan SELURUH manifest yang sebenarnya
+  // valid). LLM sering referensikan component (mis. SelectField.tsx,
+  // RequestCard.tsx) sebagai dependsOn tanpa bikin entry manifest terpisah
+  // untuk component itu — ini WAJAR dan TIDAK FATAL: dependsOn cuma dipakai
+  // buat kasih context tambahan waktu generate (lihat
+  // frontend-gen.service.ts, fileContents.has(p) check), bukan referensi
+  // yang wajib ada. Cukup filter diam-diam, jangan gagalkan manifest.
   for (const entry of entries) {
-    entry.dependsOn = entry.dependsOn.filter((dep) => {
-      const exists = seenPaths.has(dep);
-      if (!exists && !wasTruncated) errors.push(`${entry.path} depends on "${dep}" yang tidak ada di manifest`);
-      return exists;
-    });
+    entry.dependsOn = entry.dependsOn.filter((dep) => seenPaths.has(dep));
   }
 
   return { entries, errors, wasTruncated };

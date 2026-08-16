@@ -116,16 +116,12 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
   }
 
   // dependsOn harus merujuk ke path lain yang ADA di manifest (§ aturan prompt).
-  // Kalau manifest ke-truncate, dependsOn yang nunjuk ke entry yang hilang cukup
-  // di-drop (bukan error keras) — file itu sendiri masih valid digenerate.
+  // Fix (postmortem: bug yang sama ketemu lagi di frontend-gen — dependsOn
+  // yang tidak ke-resolve TIDAK PERLU jadi error fatal yang menggagalkan
+  // seluruh manifest, itu cuma berarti file itu generate dengan context
+  // lebih sedikit. Cukup drop diam-diam, jangan push ke errors[].
   for (const entry of entries) {
-    entry.dependsOn = entry.dependsOn.filter((dep) => {
-      const exists = seenPaths.has(dep);
-      if (!exists && !wasTruncated) {
-        errors.push(`${entry.path} depends on "${dep}" yang tidak ada di manifest`);
-      }
-      return exists;
-    });
+    entry.dependsOn = entry.dependsOn.filter((dep) => seenPaths.has(dep));
   }
 
   return { entries, errors, wasTruncated };
