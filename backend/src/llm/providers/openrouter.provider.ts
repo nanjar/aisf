@@ -16,6 +16,14 @@ import { GenerationRequest, GenerationResponse, LLMProvider, LLMProviderError } 
  * Rate limit request-based tetap bisa kena kalau generate banyak file
  * beruntun (>20/menit) — retry-with-backoff yang sama polanya dengan
  * GeminiProvider tetap disertakan untuk jaga-jaga.
+ *
+ * Pakai "openrouter/free" (router otomatis OpenRouter) sebagai default —
+ * artinya MODEL SEBENARNYA YANG DIPAKAI BISA BEDA-BEDA TIAP PANGGILAN
+ * (tergantung mana yang lagi tersedia). Konsekuensinya: reliabilitas per-
+ * panggilan bisa lebih bervariasi dibanding provider tunggal seperti
+ * DeepSeek langsung — postmortem: 1 panggilan balik response KOSONG
+ * (OUTPUT_INCOMPLETE), kemungkinan besar model yang ke-assign saat itu lagi
+ * bermasalah sesaat. Retry sekarang juga mencakup kasus ini, bukan cuma 429.
  */
 @Injectable()
 export class OpenRouterProvider implements LLMProvider {
@@ -53,21 +61,27 @@ export class OpenRouterProvider implements LLMProvider {
       );
     }
 
-    // Retry-with-backoff untuk 429 — pola sama dengan GeminiProvider
-    // (lihat postmortem di sana), minimum delay dipaksa 20s per attempt
-    // terlepas dari header/body yang dibalikin OpenRouter, karena window
-    // rate-limit per-menit butuh waktu ASLI buat reset.
-    const MAX_RATE_LIMIT_RETRIES = 10;
-    for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+    // Retry-with-backoff — pola sama dengan GeminiProvider (lihat postmortem
+    // di sana), minimum delay dipaksa 20s per attempt. Fix lanjutan: retry
+    // sekarang JUGA mencakup OUTPUT_INCOMPLETE (response kosong), bukan
+    // cuma 429 — postmortem: router otomatis kadang assign model yang
+    // sesaat balik respons kosong, retry biasanya cukup buat pulih (bisa
+    // dapat model yang sama atau beda dari router).
+    const MAX_RETRIES = 10;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await this.doGenerate(request);
       } catch (err) {
         const isRateLimited = err instanceof LLMProviderError && err.message.includes('HTTP 429');
-        if (!isRateLimited || attempt === MAX_RATE_LIMIT_RETRIES) throw err;
+        const isEmptyOutput = err instanceof LLMProviderError && err.category === 'OUTPUT_INCOMPLETE';
+        const isRetryable = isRateLimited || isEmptyOutput;
+        if (!isRetryable || attempt === MAX_RETRIES) throw err;
 
-        const retryDelaySeconds = 20 * (attempt + 1);
+        // Response kosong biasanya transient/cepat pulih — delay lebih pendek
+        // dari rate limit (yang butuh window per-menit beneran reset).
+        const retryDelaySeconds = isRateLimited ? 20 * (attempt + 1) : 5 * (attempt + 1);
         this.logger.warn(
-          `OpenRouter rate limited (429), retry ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES} setelah ${retryDelaySeconds}s...`,
+          `OpenRouter ${isRateLimited ? 'rate limited (429)' : 'response kosong'}, retry ${attempt + 1}/${MAX_RETRIES} setelah ${retryDelaySeconds}s...`,
         );
         await new Promise((resolve) => setTimeout(resolve, retryDelaySeconds * 1000));
       }
