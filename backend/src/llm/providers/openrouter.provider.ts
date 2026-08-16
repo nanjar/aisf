@@ -33,7 +33,14 @@ export class OpenRouterProvider implements LLMProvider {
     // kalau OPENROUTER_API_KEY belum diisi.
     this.apiKey = this.config.get<string>('OPENROUTER_API_KEY', '');
     this.baseUrl = this.config.get<string>('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
-    this.defaultModel = this.config.get<string>('OPENROUTER_DEFAULT_MODEL', 'qwen/qwen3-coder:free');
+    // Fix (postmortem: hardcode model ID ":free" spesifik - qwen3-coder:free,
+    // deepseek-v4-flash:free - dua-duanya sudah tidak tersedia lagi cuma
+    // dalam hitungan hari/minggu dari saat direkomendasikan. Daftar model
+    // gratis OpenRouter ROTASI TERUS tanpa pemberitahuan. "openrouter/free"
+    // itu ROUTER RESMI dari OpenRouter sendiri yang otomatis pilih model
+    // gratis mana pun yang SEDANG benar-benar tersedia saat itu — jauh lebih
+    // tahan lama daripada hardcode 1 model spesifik.
+    this.defaultModel = this.config.get<string>('OPENROUTER_DEFAULT_MODEL', 'openrouter/free');
     this.timeoutMs = Number(this.config.get<string>('OPENROUTER_TIMEOUT_MS', '180000'));
   }
 
