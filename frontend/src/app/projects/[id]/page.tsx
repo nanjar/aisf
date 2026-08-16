@@ -14,6 +14,37 @@ function formatDate(iso: string | null): string | null {
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/**
+ * §UX — sepanjang sesi debugging, project ID selalu perlu dicari manual dari
+ * URL browser buat dipakai di query SQL/curl. Tampilkan langsung + klik buat
+ * copy, biar troubleshooting lebih cepat.
+ */
+function ProjectIdBadge({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API bisa gagal (mis. context bukan HTTPS/localhost) — diamkan, tombolnya tetap tidak error ke user.
+    }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Klik untuk copy Project ID"
+      className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-panelBorder px-2 py-0.5 font-display text-[10px] text-inkMuted transition hover:border-track/50 hover:text-ink"
+    >
+      <span className="opacity-60">ID:</span>
+      <span className="font-mono">{id}</span>
+      {copied && <span className="text-go">✓ tersalin</span>}
+    </button>
+  );
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -88,6 +119,7 @@ export default function ProjectDetailPage() {
         <div>
           <h1 className="text-2xl font-semibold text-ink">{project.name}</h1>
           <p className="mt-1 max-w-2xl text-sm text-inkMuted">{project.businessIdea}</p>
+          <ProjectIdBadge id={project.id} />
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="whitespace-nowrap rounded-full border border-panelBorder px-3 py-1 font-display text-[11px] text-inkMuted">
