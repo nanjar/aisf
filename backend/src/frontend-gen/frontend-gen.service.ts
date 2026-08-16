@@ -142,7 +142,7 @@ export class FrontendGenService {
           revisionNote: dto.decision === 'revision' ? dto.note : undefined,
         }),
         promptVersion: FRONTEND_MANIFEST_PROMPT_VERSION,
-        maxTokens: 16384,
+        maxTokens: 32768, // dinaikkan - beri ruang untuk model reasoning yang mikir dulu sebelum jawab
       });
       totalInputTokens += manifestResponse.inputTokens;
       totalOutputTokens += manifestResponse.outputTokens;

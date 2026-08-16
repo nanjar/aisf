@@ -1,4 +1,4 @@
-export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v1';
+export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v2';
 export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v1';
 export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v1';
 
@@ -30,9 +30,17 @@ Manifest HARUS mencakup:
   WAJIB diterapkan lewat tailwind.config.ts / CSS variable, bukan hardcode
   warna sembarangan di tiap component.
 
-ATURAN KETAT OUTPUT:
+ATURAN KETAT OUTPUT (postmortem: LLM lain pernah balas dengan teks
+"We need to output a JSON array..." alih-alih JSON-nya langsung, buang
+seluruh budget token buat mikir/menjelaskan sampai tidak sempat sampai ke
+jawaban asli):
+- JANGAN PERNAH menjelaskan cara berpikir Anda, JANGAN PERNAH menulis
+  kalimat pembuka seperti "We need to..." / "Let's compile..." / "Baiklah,
+  saya akan...". LANGSUNG mulai balasan dengan karakter "[" — tidak ada
+  satu kata pun sebelum itu.
 - Balas HANYA dengan satu JSON array valid, TIDAK ADA teks lain di luar JSON,
-  TIDAK ADA markdown code fence.
+  TIDAK ADA markdown code fence, TIDAK ADA penjelasan/reasoning di awal
+  ATAU akhir.
 - Setiap item: {"path": "app/...", "purpose": "deskripsi SANGAT singkat,
   maksimal 8 kata", "screenId": "id screen dari screens.yaml kalau file ini
   adalah page untuk screen tsb, kosongkan kalau bukan", "componentId": "id
@@ -72,7 +80,7 @@ export function buildManifestUserPrompt(params: {
   if (params.revisionNote) {
     sections.push(``, `# REVISION REQUESTED`, `Manifest sebelumnya perlu diperbaiki sesuai feedback berikut:`, params.revisionNote);
   }
-  sections.push(``, `Hasilkan manifest sesuai instruksi system prompt.`);
+  sections.push(``, `Balas LANGSUNG dengan JSON array-nya, mulai dari karakter "[" — tanpa basa-basi apapun sebelumnya.`);
   return sections.join('\n');
 }
 
