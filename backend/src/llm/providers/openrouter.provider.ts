@@ -33,7 +33,7 @@ export class OpenRouterProvider implements LLMProvider {
     // kalau OPENROUTER_API_KEY belum diisi.
     this.apiKey = this.config.get<string>('OPENROUTER_API_KEY', '');
     this.baseUrl = this.config.get<string>('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
-    this.defaultModel = this.config.get<string>('OPENROUTER_DEFAULT_MODEL', 'deepseek/deepseek-v4-flash:free');
+    this.defaultModel = this.config.get<string>('OPENROUTER_DEFAULT_MODEL', 'qwen/qwen3-coder:free');
     this.timeoutMs = Number(this.config.get<string>('OPENROUTER_TIMEOUT_MS', '180000'));
   }
 
