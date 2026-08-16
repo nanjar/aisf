@@ -53,7 +53,13 @@ export class GeminiProvider implements LLMProvider {
     // sendiri bilang di pesan error "Please retry in Ns" — ini error
     // TRANSIENT yang seharusnya otomatis pulih, bukan gagal permanen. Retry
     // dengan backoff sebelum benar-benar menyerah.
-    const MAX_RATE_LIMIT_RETRIES = 5;
+    //
+    // Fix #2 (postmortem lanjutan: 5 retry masih habis, Google minta tunggu
+    // sampai 59s sekali panggil — window rate-limit per-menit lebih ketat
+    // dari dugaan awal). Naikkan ke 10 retry + tambahan buffer 2 detik di
+    // atas retryDelay yang diminta Google (jaga-jaga clock drift/latency
+    // network, supaya tidak retry pas window belum benar-benar reset).
+    const MAX_RATE_LIMIT_RETRIES = 10;
     for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
       try {
         return await this.doGenerate(request);
@@ -61,7 +67,7 @@ export class GeminiProvider implements LLMProvider {
         const isRateLimited = err instanceof LLMProviderError && err.message.includes('HTTP 429');
         if (!isRateLimited || attempt === MAX_RATE_LIMIT_RETRIES) throw err;
 
-        const retryDelaySeconds = this.extractRetryDelay(err.message) ?? 10 * (attempt + 1);
+        const retryDelaySeconds = (this.extractRetryDelay(err.message) ?? 10 * (attempt + 1)) + 2;
         this.logger.warn(
           `Gemini rate limited (429), retry ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES} setelah ${retryDelaySeconds}s...`,
         );
