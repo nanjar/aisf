@@ -67,7 +67,13 @@ export class GeminiProvider implements LLMProvider {
         const isRateLimited = err instanceof LLMProviderError && err.message.includes('HTTP 429');
         if (!isRateLimited || attempt === MAX_RATE_LIMIT_RETRIES) throw err;
 
-        const retryDelaySeconds = (this.extractRetryDelay(err.message) ?? 10 * (attempt + 1)) + 2;
+        // Fix #3 (postmortem lanjutan: Google kadang balikin "retryDelay":"0s"
+        // atau ratusan milidetik — angka itu TIDAK BISA dipercaya untuk quota
+        // per-MENIT, karena window-nya butuh waktu ASLI buat reset, bukan
+        // sepersekian detik. Paksa minimum 20 detik terlepas dari apa yang
+        // Google sarankan, plus makin lama tiap attempt berikutnya (progresif).
+        const suggestedDelay = this.extractRetryDelay(err.message) ?? 10 * (attempt + 1);
+        const retryDelaySeconds = Math.max(suggestedDelay, 20 * (attempt + 1));
         this.logger.warn(
           `Gemini rate limited (429), retry ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES} setelah ${retryDelaySeconds}s...`,
         );
