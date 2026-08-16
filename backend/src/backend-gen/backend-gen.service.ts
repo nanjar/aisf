@@ -127,7 +127,14 @@ export class BackendGenService {
 
     await this.prisma.artifactStage.update({
       where: { id: backendStage.id },
-      data: { status: StageStatus.GENERATING },
+      // Fix kritikal (postmortem: self_healing_attempts=7, jauh melebihi
+      // MAX_SELF_HEALING_ATTEMPTS=3 di ValidationService — counter ini TIDAK
+      // PERNAH direset antar percobaan/GenerationJob baru, cuma terus
+      // menumpuk dari SEMUA trigger sebelumnya. Akibatnya: canSelfHeal bisa
+      // permanently false walau attempt ini benar-benar baru dengan file
+      // fresh. Reset ke 0 di sini — setiap percobaan generate baru berhak
+      // dapat jatah self-healing penuh dari nol.
+      data: { status: StageStatus.GENERATING, selfHealingAttempts: 0, failedValidation: false },
     });
 
     const job = await this.prisma.generationJob.create({
@@ -191,7 +198,22 @@ export class BackendGenService {
       const manifestOverview = entries.map((e) => `- ${e.path}: ${e.purpose}`).join('\n');
 
       // ===== 2. File-by-file generation =====
-      const version = attempt;
+      // Fix kritikal (postmortem: 7 baris ArtifactObject duplikat untuk
+      // fileName+version yang sama, tersebar beberapa hari — validasi build
+      // ternyata mengetes campuran file BASI dari attempt lama, bukan hasil
+      // generate yang baru saja terjadi). Akar masalah: version dulu = attempt,
+      // dan attempt dihitung dari COUNT(*) GenerationJob yang MASIH ADA — tiap
+      // kali kita DELETE FROM generation_jobs WHERE status='FAILED' (rutin
+      // dilakukan buat retry), hitungan itu BALIK KE 0, jadi attempt/version
+      // berikutnya SELALU ke-reuse dari yang sudah pernah dipakai sebelumnya.
+      // Fix: hitung version dari MAX(version) yang PERNAH ada di
+      // artifact_objects untuk stage ini + 1 — tabel ini TIDAK PERNAH kita
+      // hapus manual, jadi riwayatnya utuh dan tidak akan collide lagi.
+      const lastArtifactVersion = await this.prisma.artifactObject.aggregate({
+        where: { artifactStageId: backendStage.id },
+        _max: { version: true },
+      });
+      const version = (lastArtifactVersion._max.version ?? 0) + 1;
       const fileContents = new Map<string, string>();
       let generatedCount = 0;
       let invalidCount = 0;
@@ -212,7 +234,8 @@ export class BackendGenService {
             dependencyFiles,
           }),
           promptVersion: BACKEND_FILE_PROMPT_VERSION,
-          maxTokens: 16384, // dinaikkan dari 8192 - postmortem truncation file 900-1300+ baris (date.util.ts, reports.service.ts, dst)
+          // dinaikkan dari 16384 - masih pas-pasan (file 1300+ baris ~65rb karakter, persis di batas 16384 token)
+          maxTokens: 32768,
         });
         totalInputTokens += response.inputTokens;
         totalOutputTokens += response.outputTokens;
@@ -300,8 +323,23 @@ export class BackendGenService {
 
       while (!validation.passed && validation.canSelfHeal && healingRounds < MAX_HEALING_ROUNDS) {
         healingRounds++;
-        const brokenPaths = this.extractBrokenPaths(validation.errorLog ?? '', entries.map((e) => e.path));
-        if (brokenPaths.length === 0) break; // gak bisa lokalisasi file yang error -> stop, jangan muter tanpa progress
+        const errorLog = validation.errorLog ?? '';
+        const knownPaths = entries.map((e) => e.path);
+        const brokenPaths = this.extractBrokenPaths(errorLog, knownPaths);
+
+        // Fix (postmortem cross-file contract): "Cannot find module" (TS2307)
+        // dan "has no exported member" (TS2305) itu error yang SANGAT umum
+        // kalau LLM generate import ke file/export yang tidak pernah dibuat
+        // (mis. auth.service.ts import 'UserRole' dari
+        // 'src/common/enums/user-role.enum.ts' yang tidak pernah masuk
+        // manifest sama sekali). extractBrokenPaths() lama TIDAK PERNAH
+        // tangkap ini karena error-nya sebut MODULE SPECIFIER relatif
+        // ('../common/enums/user-role.enum'), bukan full manifest path —
+        // substring match gagal total. Resolve dulu ke path manifest asli.
+        const { filesToRepair, filesToCreate } = this.resolveModuleErrors(errorLog, knownPaths);
+        for (const p of filesToRepair) if (!brokenPaths.includes(p)) brokenPaths.push(p);
+
+        if (brokenPaths.length === 0 && filesToCreate.length === 0) break; // gak bisa lokalisasi sama sekali -> stop
 
         for (const path of brokenPaths.slice(0, 10)) {
           const original = fileContents.get(path);
@@ -309,9 +347,9 @@ export class BackendGenService {
           try {
             const repairResponse = await this.llm.generate({
               systemPrompt: buildRepairSystemPrompt({ path }),
-              userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog: validation.errorLog ?? '' }),
+              userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog }),
               promptVersion: BACKEND_REPAIR_PROMPT_VERSION,
-              maxTokens: 16384,
+              maxTokens: 32768,
             });
             totalInputTokens += repairResponse.inputTokens;
             totalOutputTokens += repairResponse.outputTokens;
@@ -324,7 +362,7 @@ export class BackendGenService {
                 data: {
                   generationFileId: gf.id,
                   attemptNumber: healingRounds,
-                  errorSummary: (validation.errorLog ?? '').slice(-2000),
+                  errorSummary: errorLog.slice(-2000),
                   repairPromptVersion: BACKEND_REPAIR_PROMPT_VERSION,
                   resultStatus: GenerationFileStatus.GENERATED,
                 },
@@ -335,8 +373,66 @@ export class BackendGenService {
           }
         }
 
+        // File yang DIRUJUK tapi TIDAK PERNAH dibuat sama sekali (beda dari
+        // repair biasa — ini generate BARU dari nol, bukan perbaiki yang ada).
+        for (const path of filesToCreate.slice(0, 5)) {
+          if (fileContents.has(path)) continue; // sudah pernah dibuat di round sebelumnya
+          try {
+            const createResponse = await this.llm.generate({
+              systemPrompt: buildFileSystemPrompt({
+                path,
+                purpose:
+                  'File ini dirujuk (di-import) oleh file lain tapi belum pernah dibuat — generate isinya berdasarkan cara file lain menggunakannya, lihat error log.',
+              }),
+              userPrompt: buildFileUserPrompt({
+                prdContent: prdStage.content,
+                architectureContent: archStage.content,
+                databaseContent: dbStage.content,
+                uiuxCombined,
+                manifestOverview: `${manifestOverview}\n\n(File ini BELUM ada di manifest asli — dibutuhkan karena dirujuk file lain. Error log yang memicu:\n${errorLog.slice(-1500)})`,
+                dependencyFiles: [],
+              }),
+              promptVersion: BACKEND_REPAIR_PROMPT_VERSION,
+              maxTokens: 16384,
+            });
+            totalInputTokens += createResponse.inputTokens;
+            totalOutputTokens += createResponse.outputTokens;
+            totalTokens += createResponse.totalTokens;
+            const content = stripCodeFence(createResponse.content);
+            fileContents.set(path, content);
+            entries.push({
+              path,
+              purpose: 'Dibuat otomatis via self-healing — dirujuk file lain tapi hilang dari manifest asli',
+              dependsOn: [],
+            });
+
+            const newGf = await this.prisma.generationFile.create({
+              data: {
+                generationJobId: job.id,
+                path,
+                status: GenerationFileStatus.GENERATED,
+                dependsOnPaths: [],
+                checksum: createHash('sha256').update(content, 'utf-8').digest('hex'),
+              },
+            });
+            await this.prisma.repairAttempt.create({
+              data: {
+                generationFileId: newGf.id,
+                attemptNumber: healingRounds,
+                errorSummary: errorLog.slice(-2000),
+                repairPromptVersion: BACKEND_REPAIR_PROMPT_VERSION,
+                resultStatus: GenerationFileStatus.GENERATED,
+              },
+            });
+          } catch (err) {
+            this.logger.warn(`[BackendGen] Generate file baru gagal untuk ${path}: ${(err as Error).message}`);
+          }
+        }
+
         // Materialize() SandboxService baca SEMUA ArtifactObject per version — jadi re-upload
         // seluruh set file (bukan cuma yang diperbaiki) ke version yang sama supaya tetap lengkap.
+        // (StorageService.uploadArtifact() sekarang idempotent berdasarkan objectKey — lihat fix
+        // sesi lain di storage.service.ts — jadi aman dipanggil berulang tanpa duplikat baris.)
         for (const [path, content] of fileContents) {
           const artifactObject = await this.storage.uploadArtifact({
             artifactStageId: backendStage.id,
@@ -452,7 +548,6 @@ export class BackendGenService {
     });
   }
 
-  /** tsc --noEmit selalu sertakan path file di baris error — cocokkan terhadap manifest. */
   /**
    * tsc/build error selalu sebutkan path file secara literal, tapi npm
    * dependency-resolution error (ETARGET/E404/ERESOLVE — package yang tidak
@@ -474,6 +569,59 @@ export class BackendGenService {
       found.add('package.json');
     }
     return [...found];
+  }
+
+  /**
+   * Fix (postmortem cross-file contract, temuan investigasi paralel):
+   * TS2307 "Cannot find module" dan TS2305 "has no exported member" itu
+   * SANGAT umum kalau LLM generate import ke file/export yang tidak pernah
+   * dibuat (mis. auth.service.ts import UserRole dari
+   * '../common/enums/user-role.enum' yang tidak pernah masuk manifest sama
+   * sekali). extractBrokenPaths() lama TIDAK PERNAH tangkap ini karena error
+   * sebut MODULE SPECIFIER RELATIF ('../common/enums/user-role.enum'), bukan
+   * full manifest path ('src/common/enums/user-role.enum.ts') — substring
+   * match gagal total, self-healing selalu buta terhadap error class ini.
+   *
+   * Fungsi ini parse baris error TS2307/TS2305 (keduanya SELALU sertakan
+   * path file yang meng-import + baris:kolom di depan pesan error), resolve
+   * module specifier relatif itu jadi path manifest absolut, lalu
+   * kategorikan: kalau path hasil resolve SUDAH ada di manifest -> file itu
+   * perlu di-REPAIR (mis. tambah export yang hilang). Kalau BELUM ada sama
+   * sekali -> file itu perlu di-GENERATE BARU dari nol.
+   */
+  private resolveModuleErrors(
+    errorLog: string,
+    knownPaths: string[],
+  ): { filesToRepair: string[]; filesToCreate: string[] } {
+    const filesToRepair = new Set<string>();
+    const filesToCreate = new Set<string>();
+    const knownSet = new Set(knownPaths);
+
+    // Cocok untuk TS2307 (Cannot find module) dan TS2305 (has no exported member) —
+    // dua-duanya format: <file>(line,col): error TS230X: ...'<module-specifier>'...
+    const pattern = /([^\s(]+\.tsx?)\((\d+),(\d+)\):\s*error\s+TS230[57]:[^'"]*['"]([^'"]+)['"]/g;
+    for (const match of errorLog.matchAll(pattern)) {
+      const importingFile = match[1];
+      const moduleSpecifier = match[4];
+      if (!moduleSpecifier.startsWith('.')) continue; // skip package npm (bukan file lokal kita)
+
+      const importingDir = importingFile.split('/').slice(0, -1).join('/');
+      const resolvedParts: string[] = importingDir.split('/');
+      for (const segment of moduleSpecifier.split('/')) {
+        if (segment === '.' || segment === '') continue;
+        if (segment === '..') resolvedParts.pop();
+        else resolvedParts.push(segment);
+      }
+      const resolvedPath = `${resolvedParts.join('/')}.ts`;
+
+      if (knownSet.has(resolvedPath)) {
+        filesToRepair.add(resolvedPath);
+      } else {
+        filesToCreate.add(resolvedPath);
+      }
+    }
+
+    return { filesToRepair: [...filesToRepair], filesToCreate: [...filesToCreate] };
   }
 
   private buildSummary(entries: ManifestFileEntry[], projectName: string): string {

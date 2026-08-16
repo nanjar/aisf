@@ -14,7 +14,6 @@ import { StorageService } from '../storage/storage.service';
 @Injectable()
 export class SandboxService {
   private readonly logger = new Logger(SandboxService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -22,12 +21,25 @@ export class SandboxService {
 
   async materialize(artifactStageId: string, version: number): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'asf-validate-'));
-    const files = await this.prisma.artifactObject.findMany({ where: { artifactStageId, version } });
+
+    // Fix kritikal (postmortem: validasi build mengetes file BASI dari
+    // attempt yang jauh lebih lama — ditemukan 7 baris duplikat untuk
+    // fileName+version yang sama, tersebar dari beberapa hari berbeda,
+    // akibat version number yang kepakai ulang — lihat fix di
+    // backend-gen.service.ts). findMany() TANPA orderBy tidak menjamin
+    // urutan waktu — loop di bawah menulis tiap baris ke path YANG SAMA
+    // (join(dir, file.fileName)), saling menimpa; tanpa urutan yang benar,
+    // file yang MENANG di disk bisa jadi versi LAMA, bukan yang paling
+    // baru. orderBy createdAt asc memastikan baris PALING BARU ditulis
+    // TERAKHIR (dan karena itu yang bertahan di disk untuk validasi).
+    const files = await this.prisma.artifactObject.findMany({
+      where: { artifactStageId, version },
+      orderBy: { createdAt: 'asc' },
+    });
 
     for (const file of files) {
       const targetPath = join(dir, file.fileName);
       await mkdir(dirname(targetPath), { recursive: true });
-
       const stream = await this.storage.getObjectStream(file.bucket, file.objectKey);
       const chunks: Buffer[] = [];
       for await (const chunk of stream as any) {
@@ -35,7 +47,6 @@ export class SandboxService {
       }
       await writeFile(targetPath, Buffer.concat(chunks));
     }
-
     this.logger.log(`Materialized ${files.length} file ke ${dir}`);
     return dir;
   }
