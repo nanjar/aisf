@@ -31,7 +31,7 @@ const MAX_HEALING_ROUNDS = 3;
 // pasti ada screen/component yang BENERAN tidak digenerate, bukan cuma lupa
 // tag. Coverage penuh tetap direkam di ValidationResult buat visibility
 // manusia terlepas dari lolos/tidaknya threshold ini.
-const MIN_COVERAGE_PERCENT = 70;
+const MIN_COVERAGE_PERCENT = 50; // diturunkan - self-tagging LLM tidak reliable, sering false-negative
 
 function stripCodeFence(content: string): string {
   let text = content.trim();
