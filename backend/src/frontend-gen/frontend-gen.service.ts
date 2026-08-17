@@ -165,7 +165,18 @@ export class FrontendGenService {
       const manifestOverview = entries.map((e) => `- ${e.path}: ${e.purpose}`).join('\n');
 
       // ===== 2. File-by-file generation =====
-      const version = attempt;
+      // Fix kritikal (postmortem sama persis dengan backend-gen.service.ts):
+      // version = attempt itu SALAH - attempt dihitung dari COUNT(*)
+      // GenerationJob yang MASIH ADA, ke-reset tiap kali kita DELETE FROM
+      // generation_jobs (rutin dilakukan buat retry). Validasi build bisa
+      // mengetes file BASI dari attempt lama yang kebetulan pakai version
+      // yang sama. Hitung dari MAX(version) di artifact_objects (tabel yang
+      // TIDAK PERNAH kita hapus manual) + 1 - riwayatnya utuh, tidak collide.
+      const lastArtifactVersion = await this.prisma.artifactObject.aggregate({
+        where: { artifactStageId: frontendStage.id },
+        _max: { version: true },
+      });
+      const version = (lastArtifactVersion._max.version ?? 0) + 1;
       const fileContents = new Map<string, string>();
       let generatedCount = 0;
       let invalidCount = 0;
