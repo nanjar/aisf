@@ -24,6 +24,11 @@ import { GenerationRequest, GenerationResponse, LLMProvider, LLMProviderError } 
  * DeepSeek langsung — postmortem: 1 panggilan balik response KOSONG
  * (OUTPUT_INCOMPLETE), kemungkinan besar model yang ke-assign saat itu lagi
  * bermasalah sesaat. Retry sekarang juga mencakup kasus ini, bukan cuma 429.
+ *
+ * Postmortem lanjutan: "read ECONNRESET" (koneksi TCP terputus tiba-tiba di
+ * tengah request, error jaringan level OS, bukan dari OpenRouter/model)
+ * juga pernah bikin generation gagal total tanpa retry — sekarang JUGA
+ * di-retry, karena ini nyaris selalu transient (network blip sesaat).
  */
 @Injectable()
 export class OpenRouterProvider implements LLMProvider {
@@ -62,11 +67,12 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     // Retry-with-backoff — pola sama dengan GeminiProvider (lihat postmortem
-    // di sana), minimum delay dipaksa 20s per attempt. Fix lanjutan: retry
-    // sekarang JUGA mencakup OUTPUT_INCOMPLETE (response kosong), bukan
-    // cuma 429 — postmortem: router otomatis kadang assign model yang
-    // sesaat balik respons kosong, retry biasanya cukup buat pulih (bisa
-    // dapat model yang sama atau beda dari router).
+    // di sana), minimum delay dipaksa 20s untuk 429. Fix lanjutan: retry
+    // sekarang JUGA mencakup OUTPUT_INCOMPLETE (response kosong) DAN error
+    // jaringan transient (ECONNRESET/ECONNREFUSED/ETIMEDOUT/socket hang up)
+    // — sebelumnya kategori ini jatuh ke 'LLM_ERROR' generik yang TIDAK
+    // di-retry sama sekali, langsung gagal total walau cuma network blip
+    // sesaat yang biasanya pulih sendiri kalau dicoba lagi.
     const MAX_RETRIES = 10;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -74,14 +80,19 @@ export class OpenRouterProvider implements LLMProvider {
       } catch (err) {
         const isRateLimited = err instanceof LLMProviderError && err.message.includes('HTTP 429');
         const isEmptyOutput = err instanceof LLMProviderError && err.category === 'OUTPUT_INCOMPLETE';
-        const isRetryable = isRateLimited || isEmptyOutput;
+        const isNetworkGlitch =
+          err instanceof LLMProviderError &&
+          /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|ENOTFOUND/i.test(err.message);
+        const isRetryable = isRateLimited || isEmptyOutput || isNetworkGlitch;
         if (!isRetryable || attempt === MAX_RETRIES) throw err;
 
-        // Response kosong biasanya transient/cepat pulih — delay lebih pendek
-        // dari rate limit (yang butuh window per-menit beneran reset).
+        // Network glitch/response kosong biasanya transient/cepat pulih —
+        // delay lebih pendek dari rate limit (yang butuh window per-menit
+        // beneran reset).
         const retryDelaySeconds = isRateLimited ? 20 * (attempt + 1) : 5 * (attempt + 1);
+        const reason = isRateLimited ? 'rate limited (429)' : isEmptyOutput ? 'response kosong' : 'network glitch';
         this.logger.warn(
-          `OpenRouter ${isRateLimited ? 'rate limited (429)' : 'response kosong'}, retry ${attempt + 1}/${MAX_RETRIES} setelah ${retryDelaySeconds}s...`,
+          `OpenRouter ${reason}, retry ${attempt + 1}/${MAX_RETRIES} setelah ${retryDelaySeconds}s...`,
         );
         await new Promise((resolve) => setTimeout(resolve, retryDelaySeconds * 1000));
       }
@@ -150,9 +161,13 @@ export class OpenRouterProvider implements LLMProvider {
       const axiosErr = err as AxiosError;
       const isTimeout = axiosErr.code === 'ECONNABORTED';
       const category = isTimeout ? 'LLM_TIMEOUT' : 'LLM_ERROR';
+      // Fix: sertakan axiosErr.code (mis. "ECONNRESET") di detail — sebelumnya
+      // kalau tidak ada axiosErr.response (network error, bukan HTTP error),
+      // cuma pakai axiosErr.message ("read ECONNRESET" saja) — cukup buat
+      // regex retry di atas kok, tapi lebih eksplisit begini.
       const detail = axiosErr.response
         ? `HTTP ${axiosErr.response.status}: ${JSON.stringify(axiosErr.response.data)}`
-        : axiosErr.message;
+        : `${axiosErr.code ?? ''} ${axiosErr.message}`.trim();
 
       this.logger.error(
         `OpenRouter generation gagal setelah ${durationMs}ms (promptVersion=${request.promptVersion}): ${detail}`,
