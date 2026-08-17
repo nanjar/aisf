@@ -293,8 +293,22 @@ export class FrontendGenService {
 
       while (!validation.passed && validation.canSelfHeal && healingRounds < MAX_HEALING_ROUNDS) {
         healingRounds++;
-        const brokenPaths = this.extractBrokenPaths(validation.errorLog ?? '', entries.map((e) => e.path));
-        if (brokenPaths.length === 0) break;
+        const errorLog = validation.errorLog ?? '';
+        const knownPaths = entries.map((e) => e.path);
+        const brokenPaths = this.extractBrokenPaths(errorLog, knownPaths);
+
+        // Fix kritikal (postmortem: fitur ini SEBELUMNYA cuma ada di
+        // backend-gen.service.ts, TIDAK PERNAH di-porting ke Frontend —
+        // puluhan error "Cannot find module '@/lib/utils'" dkk tidak
+        // pernah bisa diperbaiki otomatis karena file yang dirujuk memang
+        // tidak pernah dibuat sama sekali, bukan cuma isinya salah).
+        // resolveModuleErrors() di sini JUGA dukung alias Next.js "@/..."
+        // (selain relative "./" "../" seperti versi backend) — resolve
+        // ke root project, bukan relatif ke folder file yang meng-import.
+        const { filesToRepair, filesToCreate } = this.resolveModuleErrors(errorLog, knownPaths);
+        for (const p of filesToRepair) if (!brokenPaths.includes(p)) brokenPaths.push(p);
+
+        if (brokenPaths.length === 0 && filesToCreate.length === 0) break;
 
         for (const path of brokenPaths.slice(0, 10)) {
           const original = fileContents.get(path);
@@ -302,7 +316,7 @@ export class FrontendGenService {
           try {
             const repairResponse = await this.llm.generate({
               systemPrompt: buildRepairSystemPrompt({ path }),
-              userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog: validation.errorLog ?? '' }),
+              userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog }),
               promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
               maxTokens: 16384,
             });
@@ -317,7 +331,7 @@ export class FrontendGenService {
                 data: {
                   generationFileId: gf.id,
                   attemptNumber: healingRounds,
-                  errorSummary: (validation.errorLog ?? '').slice(-2000),
+                  errorSummary: errorLog.slice(-2000),
                   repairPromptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
                   resultStatus: GenerationFileStatus.GENERATED,
                 },
@@ -325,6 +339,63 @@ export class FrontendGenService {
             }
           } catch (err) {
             this.logger.warn(`[FrontendGen] Repair gagal untuk ${path}: ${(err as Error).message}`);
+          }
+        }
+
+        // File yang DIRUJUK tapi TIDAK PERNAH dibuat sama sekali (beda dari
+        // repair biasa — ini generate BARU dari nol, bukan perbaiki yang ada).
+        for (const path of filesToCreate.slice(0, 5)) {
+          if (fileContents.has(path)) continue;
+          try {
+            const createResponse = await this.llm.generate({
+              systemPrompt: buildFileSystemPrompt({
+                path,
+                purpose: 'File ini dirujuk (di-import) oleh file lain tapi belum pernah dibuat — generate isinya berdasarkan cara file lain menggunakannya, lihat error log.',
+              }),
+              userPrompt: buildFileUserPrompt({
+                prdContent: prdStage.content,
+                architectureContent: archStage.content,
+                uiuxCombined,
+                backendSummary,
+                manifestOverview: `${manifestOverview}\n\n(File ini BELUM ada di manifest asli — dibutuhkan karena dirujuk file lain. Error log yang memicu:\n${errorLog.slice(-1500)})`,
+                dependencyFiles: [],
+              }),
+              promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
+              maxTokens: 16384,
+            });
+            totalInputTokens += createResponse.inputTokens;
+            totalOutputTokens += createResponse.outputTokens;
+            totalTokens += createResponse.totalTokens;
+            const content = stripCodeFence(createResponse.content);
+            fileContents.set(path, content);
+            entries.push({
+              path,
+              purpose: 'Dibuat otomatis via self-healing — dirujuk file lain tapi hilang dari manifest asli',
+              screenId: null,
+              componentId: null,
+              dependsOn: [],
+            });
+
+            const newGf = await this.prisma.generationFile.create({
+              data: {
+                generationJobId: job.id,
+                path,
+                status: GenerationFileStatus.GENERATED,
+                dependsOnPaths: [],
+                checksum: createHash('sha256').update(content, 'utf-8').digest('hex'),
+              },
+            });
+            await this.prisma.repairAttempt.create({
+              data: {
+                generationFileId: newGf.id,
+                attemptNumber: healingRounds,
+                errorSummary: errorLog.slice(-2000),
+                repairPromptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
+                resultStatus: GenerationFileStatus.GENERATED,
+              },
+            });
+          } catch (err) {
+            this.logger.warn(`[FrontendGen] Generate file baru gagal untuk ${path}: ${(err as Error).message}`);
           }
         }
 
@@ -418,6 +489,75 @@ export class FrontendGenService {
       found.add('package.json');
     }
     return [...found];
+  }
+
+  /**
+   * Porting dari backend-gen.service.ts, DITAMBAH dukungan alias Next.js
+   * "@/..." (selain relative "./" "../" seperti versi backend) — konvensi
+   * umum tsconfig.json Next.js: "@/*" map ke root project (bukan relatif ke
+   * folder file yang meng-import, beda dari "./"/"../").
+   *
+   * Postmortem: puluhan error "Cannot find module '@/lib/utils'" dkk tidak
+   * pernah ke-detect di Frontend karena versi awal method ini (backend)
+   * cuma tangani specifier yang mulai dengan "." — alias "@/" di-skip
+   * total, jadi self-healing "buta" terhadap file yang hilang lewat alias.
+   */
+  private resolveModuleErrors(
+    errorLog: string,
+    knownPaths: string[],
+  ): { filesToRepair: string[]; filesToCreate: string[] } {
+    const filesToRepair = new Set<string>();
+    const filesToCreate = new Set<string>();
+    const knownSet = new Set(knownPaths);
+
+    // Cocok untuk TS2307 (Cannot find module), TS2305 (has no exported
+    // member), dan TS2613/TS2614 (no default export / no exported member —
+    // muncul waktu import default vs named ketuker, TAPI kita cuma pakai ini
+    // buat cari FILE-nya untuk di-repair, bukan generate baru — file-nya
+    // jelas SUDAH ada kalau errornya soal default/named export).
+    const pattern = /([^\s(]+\.tsx?)\((\d+),(\d+)\):\s*error\s+TS(2307|2305|2613|2614):[^'"]*['"]([^'"]+)['"]/g;
+    for (const match of errorLog.matchAll(pattern)) {
+      const importingFile = match[1].replace(/^\/workspace\//, ''); // tsc kadang print absolute path /workspace/...
+      const errorCode = match[4];
+      const moduleSpecifier = match[5];
+
+      let resolvedPath: string | null = null;
+
+      if (moduleSpecifier.startsWith('.')) {
+        // Import relatif ("./foo", "../bar") — resolve relatif ke folder file yang meng-import.
+        const importingDir = importingFile.split('/').slice(0, -1).join('/');
+        const resolvedParts: string[] = importingDir.split('/');
+        for (const segment of moduleSpecifier.split('/')) {
+          if (segment === '.' || segment === '') continue;
+          if (segment === '..') resolvedParts.pop();
+          else resolvedParts.push(segment);
+        }
+        resolvedPath = `${resolvedParts.join('/')}.ts`;
+      } else if (moduleSpecifier.startsWith('@/')) {
+        // Alias Next.js — "@/lib/utils" -> "lib/utils.ts" (relatif ke ROOT project, bukan folder importer).
+        resolvedPath = `${moduleSpecifier.slice(2)}.ts`;
+      } else {
+        continue; // package npm asli (mis. "recharts") — bukan file lokal kita, skip.
+      }
+
+      // TS2613/TS2614 (export default vs named ketuker) — file-nya SUDAH ADA,
+      // ini soal isi file yang salah (export style), bukan file hilang.
+      // Coba path .tsx juga untuk component React sebelum nyerah ke .ts.
+      const candidatePaths = [resolvedPath, resolvedPath.replace(/\.ts$/, '.tsx')];
+      const existingCandidate = candidatePaths.find((p) => knownSet.has(p));
+
+      if (existingCandidate) {
+        filesToRepair.add(existingCandidate);
+      } else if (errorCode === '2307') {
+        // Betul-betul tidak ada — TS2305/2613/2614 selalu soal file yang SUDAH ada,
+        // jadi kalau tidak ketemu di manifest untuk kode-kode itu, kemungkinan besar
+        // nama path-nya beda dikit (typo casing dst) — lebih aman diam daripada bikin
+        // file duplikat yang malah nambah masalah baru.
+        filesToCreate.add(resolvedPath.endsWith('.tsx') ? resolvedPath : candidatePaths[1]);
+      }
+    }
+
+    return { filesToRepair: [...filesToRepair], filesToCreate: [...filesToCreate] };
   }
 
   private buildSummary(entries: ManifestFileEntry[], projectName: string, coverage: ReturnType<typeof checkUiuxCoverage>): string {
