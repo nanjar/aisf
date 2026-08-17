@@ -110,7 +110,15 @@ export class FrontendGenService {
       return;
     }
 
-    await this.prisma.artifactStage.update({ where: { id: frontendStage.id }, data: { status: StageStatus.GENERATING } });
+    await this.prisma.artifactStage.update({
+      where: { id: frontendStage.id },
+      // Fix kritikal (postmortem: sama bug persis yang ditemukan di
+      // backend-gen.service.ts — self_healing_attempts numpuk terus tiap
+      // attempt/trigger baru, TIDAK PERNAH direset. Reset ke 0 di sini
+      // supaya tiap percobaan generate baru dapat jatah self-healing
+      // penuh dari nol.
+      data: { status: StageStatus.GENERATING, selfHealingAttempts: 0, failedValidation: false },
+    });
 
     const job = await this.prisma.generationJob.create({
       data: {
@@ -348,7 +356,7 @@ export class FrontendGenService {
       if (validation.passed) {
         await this.prisma.artifactStage.update({
           where: { id: frontendStage.id },
-          data: { artifactName: 'frontend/*', content: summary, resumeUrl: dto.resumeUrl ?? null, generatedAt: new Date() },
+          data: { artifactName: 'frontend/*', content: summary, ...(dto.resumeUrl !== undefined ? { resumeUrl: dto.resumeUrl } : {}), generatedAt: new Date() },
         });
         await this.prisma.generationJob.update({
           where: { id: job.id },
@@ -365,7 +373,7 @@ export class FrontendGenService {
             status: StageStatus.PENDING,
             artifactName: 'frontend/*',
             content: `${summary}\n\n⚠️ VALIDASI BUILD GAGAL setelah ${healingRounds}x self-healing.\n\n${(validation.errorLog ?? '').slice(-8000)}`,
-            resumeUrl: dto.resumeUrl ?? null,
+            ...(dto.resumeUrl !== undefined ? { resumeUrl: dto.resumeUrl } : {}),
             generatedAt: new Date(),
           },
         });
