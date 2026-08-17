@@ -66,19 +66,30 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
   if (parsed.length === 0) return { entries: [], errors: ['Manifest kosong'], wasTruncated };
 
   const entries: ManifestFileEntry[] = [];
-  const seenPaths = new Set<string>();
+  // Fix kritikal (postmortem: tsc TS1149 "File name differs from already
+  // included file name only in casing" — manifest generate DUA file
+  // terpisah untuk component yang sama, mis. "components/Card.tsx" DAN
+  // "components/card.tsx", cuma beda huruf besar/kecil. Linux/git
+  // menganggap itu 2 file BEDA, tapi tsc/bundler bingung dan tsc langsung
+  // error fatal begitu ada import yang merujuk casing berbeda-beda ke
+  // "file yang sama secara konsep". Deteksi duplikat sekarang CASE-
+  // INSENSITIVE — anggap "Card.tsx" dan "card.tsx" itu path yang SAMA,
+  // simpan cuma yang PERTAMA muncul, exact casing-nya).
+  const seenPaths = new Set<string>(); // exact-case, buat isi entries.path
+  const seenPathsLower = new Map<string, string>(); // lowercase -> exact-case pertama yang dipakai
   for (const [i, item] of parsed.entries()) {
     const obj = item as Record<string, unknown>;
     if (typeof obj?.path !== 'string' || !obj.path.trim()) {
       errors.push(`Manifest[${i}] tidak punya "path" yang valid`);
       continue;
     }
-    if (seenPaths.has(obj.path)) {
-      // Fix (postmortem: duplikat path menggagalkan seluruh manifest yang
-      // sebenarnya valid) — entry pertama tetap dipakai (continue di bawah
-      // sudah skip duplikatnya), tidak perlu jadi error fatal.
+    const pathLower = obj.path.toLowerCase();
+    if (seenPathsLower.has(pathLower)) {
+      // Duplikat (persis atau cuma beda casing) — entry pertama tetap
+      // dipakai, tidak perlu jadi error fatal.
       continue;
     }
+    seenPathsLower.set(pathLower, obj.path);
     seenPaths.add(obj.path);
     entries.push({
       path: obj.path,
@@ -91,7 +102,7 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
 
   const requiredFiles = ['package.json', 'tsconfig.json', 'app/layout.tsx'];
   for (const required of requiredFiles) {
-    if (!seenPaths.has(required)) {
+    if (!seenPathsLower.has(required.toLowerCase())) {
       errors.push(`Manifest kehilangan file wajib: ${required}${wasTruncated ? ' (kemungkinan ke-truncate)' : ''}`);
     }
   }
@@ -104,8 +115,13 @@ export function parseManifest(raw: string): { entries: ManifestFileEntry[]; erro
   // buat kasih context tambahan waktu generate (lihat
   // frontend-gen.service.ts, fileContents.has(p) check), bukan referensi
   // yang wajib ada. Cukup filter diam-diam, jangan gagalkan manifest.
+  // Resolusi dependsOn JUGA case-insensitive, samakan dengan path
+  // kanonis-nya (exact-case pertama yang dipakai) — supaya dependsOn yang
+  // sebut casing berbeda dari entry aslinya tetap ke-resolve dengan benar.
   for (const entry of entries) {
-    entry.dependsOn = entry.dependsOn.filter((dep) => seenPaths.has(dep));
+    entry.dependsOn = entry.dependsOn
+      .map((dep) => seenPathsLower.get(dep.toLowerCase()))
+      .filter((dep): dep is string => dep !== undefined);
   }
 
   return { entries, errors, wasTruncated };
