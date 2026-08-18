@@ -1,6 +1,6 @@
-export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v2';
-export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v1';
-export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v1';
+export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v4';
+export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v2';
+export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v2';
 
 const TECH_STACK = 'Next.js 14 (App Router), TypeScript, TailwindCSS, Radix UI, Recharts untuk chart.';
 
@@ -30,6 +30,35 @@ Manifest HARUS mencakup:
   WAJIB diterapkan lewat tailwind.config.ts / CSS variable, bukan hardcode
   warna sembarangan di tiap component.
 
+WAJIB — TAGGING "screenId" DAN "componentId" (postmortem: dari 100+ file
+manifest, "screenId" HAMPIR SELALU diisi dengan benar, tapi "componentId"
+NYARIS SELALU DIKOSONGKAN walau file component-nya benar-benar dibuat —
+ini BUKAN opsional, ini WAJIB, dicek otomatis oleh sistem):
+- SETIAP file yang path-nya ada di folder components/ DAN namanya cocok
+  (mengabaikan besar/kecil huruf) dengan salah satu "id" di components.yaml
+  yang dilampirkan, WAJIB isi field "componentId" dengan id tsb PERSIS
+  seperti yang tertulis di components.yaml. JANGAN dikosongkan.
+- Contoh: kalau components.yaml punya entry {"id": "button", ...} dan Anda
+  bikin file "components/Button.tsx", field componentId file itu WAJIB
+  "button" — BUKAN string kosong, BUKAN "Button", HARUS PERSIS "button"
+  (case-sensitive, samakan dengan id di components.yaml).
+- Sebelum selesai, cek ulang: apakah SEMUA id di components.yaml sudah
+  muncul sebagai componentId di SALAH SATU entry manifest? Kalau ada yang
+  belum, itu artinya Anda lupa tag file yang bersangkutan — perbaiki.
+
+WAJIB — DEPENDENCY NPM YANG BENAR-BENAR DIPAKAI (postmortem: banyak file
+component pakai import seperti "react-hook-form", "@hookform/resolvers/zod",
+"next-auth/react", "sonner" — TAPI package.json TIDAK PERNAH mencantumkan
+paket-paket itu di dependencies, jadi tsc gagal total "Cannot find module"):
+- Kalau UI/UX Design Specification menyiratkan kebutuhan form validation,
+  toast notification, auth session, dst — package.json WAJIB cantumkan
+  package yang benar-benar akan dipakai file-file lain (mis. jangan sebut
+  "react-hook-form" di file lain kalau package.json tidak mencantumkannya).
+  Sebaliknya, kalau memang tidak perlu library eksternal untuk sebuah
+  kebutuhan (mis. form sederhana), JANGAN import library yang tidak
+  tercantum di package.json — tulis manual pakai useState/native HTML
+  form saja.
+
 ATURAN KETAT OUTPUT (postmortem: LLM lain pernah balas dengan teks
 "We need to output a JSON array..." alih-alih JSON-nya langsung, buang
 seluruh budget token buat mikir/menjelaskan sampai tidak sempat sampai ke
@@ -44,9 +73,10 @@ jawaban asli):
 - Setiap item: {"path": "app/...", "purpose": "deskripsi SANGAT singkat,
   maksimal 8 kata", "screenId": "id screen dari screens.yaml kalau file ini
   adalah page untuk screen tsb, kosongkan kalau bukan", "componentId": "id
-  component dari components.yaml kalau file ini adalah component tsb,
-  kosongkan kalau bukan", "dependsOn": ["path file lain yang isinya WAJIB
-  dibaca — MAKSIMAL 3 path paling penting saja"]}
+  component dari components.yaml — WAJIB diisi kalau file ini component,
+  lihat aturan tagging di atas, JANGAN dikosongkan kalau memang component",
+  "dependsOn": ["path file lain yang isinya WAJIB dibaca — MAKSIMAL 3 path
+  paling penting saja"]}
 - URUTAN DI JSON: taruh package.json, tsconfig.json, tailwind.config.ts,
   app/layout.tsx DI PALING AWAL array — supaya kalau output ke-truncate,
   file wajib ini tetap aman. Urutan generate sebenarnya dari "dependsOn".
@@ -80,7 +110,7 @@ export function buildManifestUserPrompt(params: {
   if (params.revisionNote) {
     sections.push(``, `# REVISION REQUESTED`, `Manifest sebelumnya perlu diperbaiki sesuai feedback berikut:`, params.revisionNote);
   }
-  sections.push(``, `Balas LANGSUNG dengan JSON array-nya, mulai dari karakter "[" — tanpa basa-basi apapun sebelumnya.`);
+  sections.push(``, `Balas LANGSUNG dengan JSON array-nya, mulai dari karakter "[" — tanpa basa-basi apapun sebelumnya. Ingat: SETIAP file component WAJIB punya componentId terisi, jangan dikosongkan; JANGAN import package npm yang tidak tercantum di package.json.`);
   return sections.join('\n');
 }
 
@@ -97,7 +127,30 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
 - JAGA FILE TETAP FOKUS DAN RINGKAS (postmortem: file bisa kepotong kalau
   kepanjangan). Kalau satu file mulai terasa terlalu besar (>400-500 baris),
   fokus ke implementasi inti, hindari komentar panjang dan boilerplate
-  berulang.`;
+  berulang.
+- PERHATIKAN JSX DITUTUP DENGAN BENAR (postmortem: component kalender
+  kompleks pernah gagal build karena tag <div> tidak ketutup semua —
+  TS17008). Sebelum selesai, hitung ulang pasangan tag pembuka/penutup,
+  terutama untuk component dengan banyak nested div/conditional rendering.
+- WAJIB PAKAI NAMED EXPORT UNTUK SEMUA COMPONENT REACT, JANGAN DEFAULT EXPORT
+  (postmortem FATAL: puluhan file gagal build "Module has no exported
+  member 'Button'" karena components/Button.tsx pakai "export default"
+  sementara SEMUA file lain yang meng-import-nya pakai
+  "import { Button } from '@/components/Button'" — konvensi harus
+  KONSISTEN di SELURUH project). Tulis SELALU begini:
+  "export function Button(props: ButtonProps) { ... }" atau
+  "export const Button = (props: ButtonProps) => { ... }" — TIDAK PERNAH
+  "export default function Button...". Ini berlaku untuk SEMUA file di
+  folder components/, tanpa kecuali.
+- KALAU file ini page (app/.../page.tsx), page BOLEH default export
+  (konvensi Next.js App Router memang wajib default export untuk page.tsx
+  — aturan named-export di atas KHUSUS untuk folder components/, bukan
+  untuk page.tsx).
+- HANYA import package npm yang BENAR-BENAR ada di package.json project ini
+  (lihat manifest overview/dependency yang dilampirkan). JANGAN import
+  "react-hook-form", "next-auth", "sonner", atau library lain yang terasa
+  umum tapi belum pasti ada di package.json — cek dulu, kalau ragu tulis
+  manual tanpa library.`;
 
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
   const packageJsonHint =
@@ -107,7 +160,9 @@ ADA dan yakin benar (mis. "next", "react", "react-dom", "tailwindcss",
 "@radix-ui/*", "recharts", "axios", "zod" — package populer dan umum
 dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
 tidak yakin ada. Kalau ragu, JANGAN pakai — cari alternatif yang sudah
-pasti familiar.\n`
+pasti familiar. PENTING: package.json ini jadi SATU-SATUNYA sumber
+kebenaran dependency untuk SELURUH project — file lain HANYA boleh import
+package yang tercantum di sini.\n`
       : '';
 
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
@@ -159,14 +214,39 @@ export function buildRepairSystemPrompt(fileInfo: { path: string }): string {
 sebuah package: package itu KEMUNGKINAN BESAR TIDAK ADA di npm registry
 (nama hasil karangan). JANGAN coba versi lain dari package yang sama —
 GANTI ke package NYATA yang benar-benar ada, atau HAPUS dependency itu
-kalau tidak yakin nama yang benar.\n`
+kalau tidak yakin nama yang benar.
+
+Kalau error-nya "Cannot find module 'X'" untuk package npm ASLI (mis.
+react-hook-form, next-auth, sonner) yang dipakai file LAIN tapi tidak ada
+di package.json ini: TAMBAHKAN package itu ke dependencies dengan versi
+yang wajar (mis. "^7.0.0" untuk react-hook-form) — JANGAN hapus/ubah
+import di file lain, package.json yang harus menyesuaikan.\n`
       : '';
+
+  const jsxHint = `\nKalau error-nya soal JSX (TS17008 "no corresponding closing tag", TS1005
+"'/' expected" atau "'</' expected"): itu tanda ada tag pembuka yang tidak
+punya pasangan penutup, atau sebaliknya. Baca ULANG SELURUH file dari awal,
+hitung setiap <div>, <span>, dst yang dibuka HARUS ketemu penutupnya
+sebelum function/component berakhir. Tulis ULANG STRUKTUR JSX-nya dari nol
+dengan indentasi rapi kalau perlu — jangan cuma tempel penutup di akhir
+tanpa mastikan urutan nesting-nya benar.\n`;
+
+  const exportHint = `\nKalau error-nya "has no exported member 'X'" atau "has no default export"
+(TS2305/TS2613/TS2614): ini soal KONVENSI EXPORT yang tidak konsisten.
+File component React di folder components/ WAJIB pakai NAMED EXPORT
+("export function X" atau "export const X = ..."), TIDAK PERNAH default
+export. Kalau file ini SEDANG memakai "export default", ganti jadi named
+export SAMBIL TETAP JAGA nama function/component-nya persis sama (supaya
+file lain yang sudah import { X } otomatis cocok tanpa perlu diubah juga).
+Kalau file ini BUKAN component (mis. lib/api.ts) dan error soal "no
+exported member 'namaFungsi'": tambahkan export named untuk fungsi yang
+diminta, JANGAN hapus/ubah fungsi lain yang sudah ada.\n`;
 
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 File "${fileInfo.path}" gagal compile/build. Perbaiki HANYA error yang
 disebutkan di error log — jangan ubah behavior/struktur lain yang tidak error.
-${packageJsonHint}
+${packageJsonHint}${jsxHint}${exportHint}
 ${OUTPUT_RULES}`;
 }
 
