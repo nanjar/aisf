@@ -156,6 +156,17 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   "react-hook-form", "next-auth", "sonner", atau library lain yang terasa
   umum tapi belum pasti ada di package.json — cek dulu, kalau ragu tulis
   manual tanpa library.
+- DESAIN PROP COMPONENT SHARED HARUS FLEKSIBEL, TERIMA "children" UNTUK
+  KONTEN TEKS (postmortem FATAL: puluhan file pakai pola React wajar
+  "<Badge>{teks}</Badge>" atau "<Alert>{pesan}</Alert>", tapi component
+  BadgeProps/AlertProps HANYA terima prop "label"/"message", TIDAK terima
+  "children" — bikin error "Property 'children' does not exist on type").
+  Kalau Anda generate component shared (Badge, Alert, Card, Tooltip, dst)
+  yang menampilkan TEKS/KONTEN: WAJIB terima "children: React.ReactNode" di
+  props-nya SEBAGAI CARA UTAMA menampilkan isi (bukan cuma prop "label"
+  string) — ini pola React paling umum dipakai file lain secara alami.
+  Kalau memang perlu prop "label" juga (mis. untuk aksesibilitas), buat
+  keduanya optional dan render salah satu (children diutamakan kalau ada).
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
