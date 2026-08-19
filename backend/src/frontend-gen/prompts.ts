@@ -1,6 +1,6 @@
 export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v4';
-export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v2';
-export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v2';
+export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v3';
+export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v3';
 
 const TECH_STACK = 'Next.js 14 (App Router), TypeScript, TailwindCSS, Radix UI, Recharts untuk chart.';
 
@@ -152,6 +152,26 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   umum tapi belum pasti ada di package.json — cek dulu, kalau ragu tulis
   manual tanpa library.`;
 
+const API_CLIENT_HINT = `\nPENTING soal lib/api.ts (postmortem FATAL: file ini digenerate PALING
+AWAL, sebelum page/component lain yang akan MEMAKAINYA — puluhan file lain
+gagal build "Module @/lib/api has no exported member 'login'/'getTeams'/dst"
+karena lib/api.ts cuma export function yang "kelihatan perlu" saat itu, TIDAK
+lengkap mencakup semua endpoint Backend API Contract):
+- Export SATU named function terpisah untuk SETIAP endpoint yang ada di
+  Backend API Contract yang dilampirkan — bukan cuma yang terasa relevan.
+  Kalau Backend API Contract punya endpoint GET /users, POST /users,
+  PUT /users/:id, DELETE /users/:id — WAJIB ada getUsers(), createUser(),
+  updateUser(), deleteUser() (atau nama serupa yang jelas & konsisten),
+  SEMUANYA, bukan cuma yang paling jelas dipakai.
+- Nama function HARUS deskriptif & predictable (verb+noun: getTeams,
+  createSwapRequest, login, dst) — file lain akan menebak nama ini dari
+  konteks penggunaan tanpa bisa melihat isi lib/api.ts, jadi nama harus
+  masuk akal dan konsisten dengan pola REST standar.
+- JANGAN bungkus semua endpoint jadi 1 object besar (mis. "export default
+  { getUsers, createUser }") — WAJIB named export terpisah per function
+  ("export function getUsers() {...}", "export function createUser() {...}"
+  dst), supaya file lain bisa "import { getUsers } from '@/lib/api'".\n`;
+
 export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
   const packageJsonHint =
     fileInfo.path === 'package.json'
@@ -164,13 +184,14 @@ pasti familiar. PENTING: package.json ini jadi SATU-SATUNYA sumber
 kebenaran dependency untuk SELURUH project — file lain HANYA boleh import
 package yang tercantum di sini.\n`
       : '';
+  const apiHint = fileInfo.path.includes('lib/api') ? API_CLIENT_HINT : '';
 
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
 Anda sedang generate SATU file dari manifest frontend, SATU PER PANGGILAN:
 - Path: ${fileInfo.path}
 - Tujuan file ini: ${fileInfo.purpose}
-${packageJsonHint}
+${packageJsonHint}${apiHint}
 ${OUTPUT_RULES}`;
 }
 
@@ -238,9 +259,11 @@ File component React di folder components/ WAJIB pakai NAMED EXPORT
 export. Kalau file ini SEDANG memakai "export default", ganti jadi named
 export SAMBIL TETAP JAGA nama function/component-nya persis sama (supaya
 file lain yang sudah import { X } otomatis cocok tanpa perlu diubah juga).
-Kalau file ini BUKAN component (mis. lib/api.ts) dan error soal "no
-exported member 'namaFungsi'": tambahkan export named untuk fungsi yang
-diminta, JANGAN hapus/ubah fungsi lain yang sudah ada.\n`;
+Kalau file ini "lib/api.ts" dan error "no exported member 'namaFungsi'":
+TAMBAHKAN function itu sebagai named export baru (jangan hapus fungsi lain
+yang sudah ada) — errornya bermakna file LAIN sudah coba import fungsi ini,
+jadi buat implementasi yang masuk akal berdasar namanya (mis. "getTeams"
+berarti GET request ke endpoint teams).\n`;
 
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
