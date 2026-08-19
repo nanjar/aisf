@@ -200,7 +200,19 @@ lengkap mencakup semua endpoint Backend API Contract):
 - JANGAN bungkus semua endpoint jadi 1 object besar (mis. "export default
   { getUsers, createUser }") — WAJIB named export terpisah per function
   ("export function getUsers() {...}", "export function createUser() {...}"
-  dst), supaya file lain bisa "import { getUsers } from '@/lib/api'".\n`;
+  dst), supaya file lain bisa "import { getUsers } from '@/lib/api'".
+- IMPLEMENTASI HTTP: pakai "axios" LANGSUNG di dalam lib/api.ts, JANGAN
+  bergantung pada Context/class ApiClient terpisah yang rumit (postmortem
+  FATAL: puluhan error "'get'/'post' does not exist on type
+  ApiClientContextValue" - lib/api.ts coba panggil method dari sebuah
+  Context yang sebenarnya tidak expose method HTTP langsung). Buat 1
+  instance axios SEDERHANA di ATAS file ini, lalu SETIAP function endpoint
+  panggil method dari instance axios INI LANGSUNG (bukan ke Context, bukan
+  ke class terpisah, bukan lewat abstraction lain):
+  "import axios from 'axios'; const api = axios.create({ baseURL:
+  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:6001' });" lalu
+  panggil "api.get(...)" / "api.post(...)" dst langsung ke variabel "api"
+  itu di setiap function endpoint. Sesederhana mungkin.\n`;
 
 const PACKAGE_JSON_HINT = `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
 ADA dan yakin benar (mis. "next", "react", "react-dom", "tailwindcss",
