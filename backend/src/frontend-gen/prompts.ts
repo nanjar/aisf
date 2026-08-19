@@ -137,6 +137,17 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   kompleks pernah gagal build karena tag <div> tidak ketutup semua —
   TS17008). Sebelum selesai, hitung ulang pasangan tag pembuka/penutup,
   terutama untuk component dengan banyak nested div/conditional rendering.
+- HATI-HATI DENGAN TEMPLATE LITERAL (backtick), TERUTAMA DI DALAM className
+  DINAMIS (postmortem FATAL: "Unterminated template literal" muncul di
+  BARIS PALING AKHIR file, tapi error lain muncul dari BARIS AWAL - ini
+  tanda 1 backtick tidak pernah ditutup di awal file, bikin SISA seluruh
+  file dianggap "masih di dalam string" oleh compiler sampai akhir, error
+  jadi menyebar ke ratusan baris). Kalau butuh className dinamis, PASTIKAN
+  setiap backtick pembuka punya PERSIS SATU backtick penutup di baris yang
+  sama. Kalau ragu atau kondisinya rumit (banyak kondisi bercabang), JANGAN
+  pakai template literal sama sekali - pakai fungsi cn() dari lib/utils
+  dengan argumen terpisah dan operator ternary biasa, jauh lebih aman dari
+  risiko salah tutup backtick.
 - WAJIB PAKAI NAMED EXPORT UNTUK SEMUA COMPONENT REACT, JANGAN DEFAULT EXPORT
   (postmortem FATAL: puluhan file gagal build "Module has no exported
   member 'Button'" karena components/Button.tsx pakai "export default"
