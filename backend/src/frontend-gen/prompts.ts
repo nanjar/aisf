@@ -1,6 +1,6 @@
 export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v4';
-export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v3';
-export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v3';
+export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v4';
+export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v4';
 
 const TECH_STACK = 'Next.js 14 (App Router), TypeScript, TailwindCSS, Radix UI, Recharts untuk chart.';
 
@@ -150,7 +150,10 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   (lihat manifest overview/dependency yang dilampirkan). JANGAN import
   "react-hook-form", "next-auth", "sonner", atau library lain yang terasa
   umum tapi belum pasti ada di package.json — cek dulu, kalau ragu tulis
-  manual tanpa library.`;
+  manual tanpa library.
+- Path dan tujuan spesifik file yang harus Anda generate SEKARANG ada di
+  BAGIAN PALING BAWAH pesan user setelah semua konteks project — baca
+  sampai ke situ sebelum mulai menulis.`;
 
 const API_CLIENT_HINT = `\nPENTING soal lib/api.ts (postmortem FATAL: file ini digenerate PALING
 AWAL, sebelum page/component lain yang akan MEMAKAINYA — puluhan file lain
@@ -172,26 +175,35 @@ lengkap mencakup semua endpoint Backend API Contract):
   ("export function getUsers() {...}", "export function createUser() {...}"
   dst), supaya file lain bisa "import { getUsers } from '@/lib/api'".\n`;
 
-export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string }): string {
-  const packageJsonHint =
-    fileInfo.path === 'package.json'
-      ? `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
+const PACKAGE_JSON_HINT = `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
 ADA dan yakin benar (mis. "next", "react", "react-dom", "tailwindcss",
 "@radix-ui/*", "recharts", "axios", "zod" — package populer dan umum
 dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
 tidak yakin ada. Kalau ragu, JANGAN pakai — cari alternatif yang sudah
 pasti familiar. PENTING: package.json ini jadi SATU-SATUNYA sumber
 kebenaran dependency untuk SELURUH project — file lain HANYA boleh import
-package yang tercantum di sini.\n`
-      : '';
-  const apiHint = fileInfo.path.includes('lib/api') ? API_CLIENT_HINT : '';
+package yang tercantum di sini.\n`;
 
+// Fix biaya (postmortem: 1x generate ~90 file = $3.89 — mahal padahal
+// DeepSeek native SEHARUSNYA otomatis dapat context caching 98% lebih murah
+// untuk prefix yang identik ANTAR PANGGILAN. Root cause: system prompt
+// SEBELUMNYA selalu interpolasi fileInfo.path/purpose LANGSUNG di dalamnya
+// — beda tiap file, jadi PERSIS di awal request (system message SELALU di
+// posisi pertama di array messages OpenAI-compatible), mematahkan cache
+// SEBELUM konten besar yang identik (PRD/Architecture/UIUX) sempat
+// ke-match. Fix: system prompt sekarang 100% STATIS (sama persis tiap
+// panggilan dalam 1 project), info spesifik file (path/purpose/hint)
+// dipindah ke PALING BAWAH user prompt — supaya prefix identik (system +
+// sebagian besar user prompt) sepanjang mungkin sebelum ketemu bagian yang
+// berubah-ubah, memaksimalkan cache-hit DeepSeek.
+export function buildFileSystemPrompt(): string {
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
-Anda sedang generate SATU file dari manifest frontend, SATU PER PANGGILAN:
-- Path: ${fileInfo.path}
-- Tujuan file ini: ${fileInfo.purpose}
-${packageJsonHint}${apiHint}
+Anda akan generate file frontend SATU PER PANGGILAN. Detail file yang harus
+digenerate SEKARANG (path & tujuannya) ada di BAGIAN PALING BAWAH user
+prompt — baca konteks project dulu (PRD/Architecture/UI-UX/Backend API),
+baru scroll ke bawah untuk tahu file mana yang diminta kali ini.
+
 ${OUTPUT_RULES}`;
 }
 
@@ -202,7 +214,12 @@ export function buildFileUserPrompt(params: {
   backendSummary: string;
   manifestOverview: string;
   dependencyFiles: { path: string; content: string }[];
+  fileInfo: { path: string; purpose: string };
 }): string {
+  // Urutan SENGAJA: konten besar yang SAMA PERSIS tiap panggilan (manifest,
+  // PRD, Architecture, UIUX, Backend summary) di paling ATAS — ini yang
+  // dapat manfaat context caching DeepSeek. Info spesifik file (beda tiap
+  // panggilan) SELALU di paling BAWAH — lihat komentar di buildFileSystemPrompt.
   const sections = [
     `# Manifest lengkap (referensi struktur project)`,
     params.manifestOverview,
@@ -225,13 +242,29 @@ export function buildFileUserPrompt(params: {
       sections.push(``, `### ${dep.path}`, dep.content);
     }
   }
+
+  const packageJsonHint = params.fileInfo.path === 'package.json' ? PACKAGE_JSON_HINT : '';
+  const apiHint = params.fileInfo.path.includes('lib/api') ? API_CLIENT_HINT : '';
+  sections.push(
+    ``,
+    `# ===== FILE YANG HARUS DIGENERATE SEKARANG =====`,
+    `Path: ${params.fileInfo.path}`,
+    `Tujuan file ini: ${params.fileInfo.purpose}`,
+    packageJsonHint,
+    apiHint,
+  );
+
   return sections.join('\n');
 }
 
-export function buildRepairSystemPrompt(fileInfo: { path: string }): string {
-  const packageJsonHint =
-    fileInfo.path === 'package.json'
-      ? `\nKalau error-nya "No matching version found" / "notarget" / "E404" untuk
+export function buildRepairSystemPrompt(): string {
+  return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
+
+Anda akan diminta perbaiki SATU file yang gagal compile/build. Detail file
+(path, isi saat ini, error log) ada di user prompt. Perbaiki HANYA error
+yang disebutkan — jangan ubah behavior/struktur lain yang tidak error.
+
+Kalau error-nya "No matching version found" / "notarget" / "E404" untuk
 sebuah package: package itu KEMUNGKINAN BESAR TIDAK ADA di npm registry
 (nama hasil karangan). JANGAN coba versi lain dari package yang sama —
 GANTI ke package NYATA yang benar-benar ada, atau HAPUS dependency itu
@@ -241,18 +274,17 @@ Kalau error-nya "Cannot find module 'X'" untuk package npm ASLI (mis.
 react-hook-form, next-auth, sonner) yang dipakai file LAIN tapi tidak ada
 di package.json ini: TAMBAHKAN package itu ke dependencies dengan versi
 yang wajar (mis. "^7.0.0" untuk react-hook-form) — JANGAN hapus/ubah
-import di file lain, package.json yang harus menyesuaikan.\n`
-      : '';
+import di file lain, package.json yang harus menyesuaikan.
 
-  const jsxHint = `\nKalau error-nya soal JSX (TS17008 "no corresponding closing tag", TS1005
+Kalau error-nya soal JSX (TS17008 "no corresponding closing tag", TS1005
 "'/' expected" atau "'</' expected"): itu tanda ada tag pembuka yang tidak
 punya pasangan penutup, atau sebaliknya. Baca ULANG SELURUH file dari awal,
 hitung setiap <div>, <span>, dst yang dibuka HARUS ketemu penutupnya
 sebelum function/component berakhir. Tulis ULANG STRUKTUR JSX-nya dari nol
 dengan indentasi rapi kalau perlu — jangan cuma tempel penutup di akhir
-tanpa mastikan urutan nesting-nya benar.\n`;
+tanpa mastikan urutan nesting-nya benar.
 
-  const exportHint = `\nKalau error-nya "has no exported member 'X'" atau "has no default export"
+Kalau error-nya "has no exported member 'X'" atau "has no default export"
 (TS2305/TS2613/TS2614): ini soal KONVENSI EXPORT yang tidak konsisten.
 File component React di folder components/ WAJIB pakai NAMED EXPORT
 ("export function X" atau "export const X = ..."), TIDAK PERNAH default
@@ -263,18 +295,16 @@ Kalau file ini "lib/api.ts" dan error "no exported member 'namaFungsi'":
 TAMBAHKAN function itu sebagai named export baru (jangan hapus fungsi lain
 yang sudah ada) — errornya bermakna file LAIN sudah coba import fungsi ini,
 jadi buat implementasi yang masuk akal berdasar namanya (mis. "getTeams"
-berarti GET request ke endpoint teams).\n`;
+berarti GET request ke endpoint teams).
 
-  return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
-
-File "${fileInfo.path}" gagal compile/build. Perbaiki HANYA error yang
-disebutkan di error log — jangan ubah behavior/struktur lain yang tidak error.
-${packageJsonHint}${jsxHint}${exportHint}
 ${OUTPUT_RULES}`;
 }
 
-export function buildRepairUserPrompt(params: { originalContent: string; errorLog: string }): string {
+export function buildRepairUserPrompt(params: { path: string; originalContent: string; errorLog: string }): string {
   return [
+    `# Path file`,
+    params.path,
+    ``,
     `# Isi file saat ini (yang gagal compile/build)`,
     params.originalContent,
     ``,

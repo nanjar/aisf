@@ -33,6 +33,11 @@ const MAX_HEALING_ROUNDS = 3;
 // manusia terlepas dari lolos/tidaknya threshold ini.
 const MIN_COVERAGE_PERCENT = 50; // diturunkan - self-tagging LLM tidak reliable, sering false-negative
 
+// Sama pola dengan system prompt di prompts.ts — model default dipanggil
+// hanya buat catatan awal generationJob.create() sebelum response LLM asli
+// datang (yang isi field "model" sesungguhnya).
+const DEFAULT_MODEL_LABEL = 'deepseek-v4-flash';
+
 function stripCodeFence(content: string): string {
   let text = content.trim();
   text = text.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
@@ -123,7 +128,7 @@ export class FrontendGenService {
     const job = await this.prisma.generationJob.create({
       data: {
         artifactStageId: frontendStage.id,
-        model: 'deepseek-chat',
+        model: DEFAULT_MODEL_LABEL,
         promptVersion: FRONTEND_MANIFEST_PROMPT_VERSION,
         status: GenerationJobStatus.RUNNING,
         attempt,
@@ -135,7 +140,7 @@ export class FrontendGenService {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalTokens = 0;
-    let lastModel = 'deepseek-chat';
+    let lastModel = DEFAULT_MODEL_LABEL;
 
     try {
       // ===== 1. Manifest =====
@@ -189,13 +194,21 @@ export class FrontendGenService {
       let generatedCount = 0;
       let invalidCount = 0;
 
+      // Fix biaya (postmortem: 1x generate ~90 file = $3.89). System prompt
+      // sekarang 100% statis (lihat prompts.ts) — dibuat SEKALI di luar
+      // loop, bukan re-generate string tiap iterasi (tidak berpengaruh ke
+      // isi tapi lebih bersih) — yang PALING penting: prefix system+awal
+      // user prompt sekarang IDENTIK di setiap panggilan dalam project ini,
+      // memaksimalkan context caching DeepSeek (98% lebih murah per cache-hit).
+      const fileSystemPrompt = buildFileSystemPrompt();
+
       for (const entry of entries) {
         const dependencyFiles = entry.dependsOn
           .filter((p) => fileContents.has(p))
           .map((p) => ({ path: p, content: fileContents.get(p) as string }));
 
         const response = await this.llm.generate({
-          systemPrompt: buildFileSystemPrompt(entry),
+          systemPrompt: fileSystemPrompt,
           userPrompt: buildFileUserPrompt({
             prdContent: prdStage.content,
             architectureContent: archStage.content,
@@ -203,6 +216,7 @@ export class FrontendGenService {
             backendSummary,
             manifestOverview,
             dependencyFiles,
+            fileInfo: { path: entry.path, purpose: entry.purpose },
           }),
           promptVersion: FRONTEND_FILE_PROMPT_VERSION,
           maxTokens: 16384, // dinaikkan dari 8192, sama alasan dengan backend-gen.service.ts
@@ -290,6 +304,7 @@ export class FrontendGenService {
 
       let validation = await this.validationService.validateStage({ projectId: dto.projectId, stageKey: 'FRONTEND', version });
       let healingRounds = 0;
+      const repairSystemPrompt = buildRepairSystemPrompt(); // sama alasan caching — statis, dibuat sekali
 
       while (!validation.passed && validation.canSelfHeal && healingRounds < MAX_HEALING_ROUNDS) {
         healingRounds++;
@@ -315,8 +330,8 @@ export class FrontendGenService {
           if (!original) continue;
           try {
             const repairResponse = await this.llm.generate({
-              systemPrompt: buildRepairSystemPrompt({ path }),
-              userPrompt: buildRepairUserPrompt({ originalContent: original, errorLog }),
+              systemPrompt: repairSystemPrompt,
+              userPrompt: buildRepairUserPrompt({ path, originalContent: original, errorLog }),
               promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
               maxTokens: 16384,
             });
@@ -348,17 +363,18 @@ export class FrontendGenService {
           if (fileContents.has(path)) continue;
           try {
             const createResponse = await this.llm.generate({
-              systemPrompt: buildFileSystemPrompt({
-                path,
-                purpose: 'File ini dirujuk (di-import) oleh file lain tapi belum pernah dibuat — generate isinya berdasarkan cara file lain menggunakannya, lihat error log.',
-              }),
+              systemPrompt: fileSystemPrompt,
               userPrompt: buildFileUserPrompt({
                 prdContent: prdStage.content,
                 architectureContent: archStage.content,
                 uiuxCombined,
                 backendSummary,
-                manifestOverview: `${manifestOverview}\n\n(File ini BELUM ada di manifest asli — dibutuhkan karena dirujuk file lain. Error log yang memicu:\n${errorLog.slice(-1500)})`,
+                manifestOverview,
                 dependencyFiles: [],
+                fileInfo: {
+                  path,
+                  purpose: `File ini dirujuk (di-import) oleh file lain tapi belum pernah dibuat — generate isinya berdasarkan cara file lain menggunakannya. Error log yang memicu:\n${errorLog.slice(-1500)}`,
+                },
               }),
               promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
               maxTokens: 16384,
