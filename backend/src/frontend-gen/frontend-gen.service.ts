@@ -325,7 +325,7 @@ export class FrontendGenService {
 
         if (brokenPaths.length === 0 && filesToCreate.length === 0) break;
 
-        for (const path of brokenPaths.slice(0, 10)) {
+        for (const path of brokenPaths.slice(0, 25)) {
           const original = fileContents.get(path);
           if (!original) continue;
           try {
@@ -359,7 +359,7 @@ export class FrontendGenService {
 
         // File yang DIRUJUK tapi TIDAK PERNAH dibuat sama sekali (beda dari
         // repair biasa — ini generate BARU dari nol, bukan perbaiki yang ada).
-        for (const path of filesToCreate.slice(0, 5)) {
+        for (const path of filesToCreate.slice(0, 10)) {
           if (fileContents.has(path)) continue;
           try {
             const createResponse = await this.llm.generate({

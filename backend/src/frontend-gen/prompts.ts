@@ -338,6 +338,20 @@ File component React di folder components/ WAJIB pakai NAMED EXPORT
 export. Kalau file ini SEDANG memakai "export default", ganti jadi named
 export SAMBIL TETAP JAGA nama function/component-nya persis sama (supaya
 file lain yang sudah import { X } otomatis cocok tanpa perlu diubah juga).
+Kalau error-nya "Cannot find name 'X'" (TS2304): ini berarti nama X dipakai
+di file tapi TIDAK ADA import untuk itu. Tentukan sumbernya:
+- Kalau X adalah hook React (useState, useEffect, useMemo, useCallback,
+  useRef, dst): tambahkan/lengkapi baris "import { X } from 'react'" di
+  paling atas file (gabung dengan hook lain yang sudah di-import kalau ada).
+- Kalau X adalah nama Component (huruf awal kapital, mis. Button, Select,
+  ToggleSwitch, Table): tambahkan "import { X } from '@/components/X'" —
+  asumsikan nama file component sama dengan nama Component-nya.
+- Kalau X adalah nama icon (mis. EyeIcon, TrashIcon, SearchIcon): kemungkinan
+  dari library icon yang sudah ada di package.json (mis. lucide-react) —
+  tambahkan import yang sesuai.
+- PERBAIKI SEMUA kemunculan "Cannot find name" di error log ini, jangan
+  cuma yang pertama — biasanya banyak nama hilang sekaligus di 1 file.
+
 Kalau file ini "lib/api.ts" dan error "no exported member 'namaFungsi'":
 TAMBAHKAN function itu sebagai named export baru (jangan hapus fungsi lain
 yang sudah ada) — errornya bermakna file LAIN sudah coba import fungsi ini,
