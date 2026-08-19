@@ -156,6 +156,17 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   "react-hook-form", "next-auth", "sonner", atau library lain yang terasa
   umum tapi belum pasti ada di package.json — cek dulu, kalau ragu tulis
   manual tanpa library.
+- WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
+  file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
+  TANPA satu baris import pun — file "berjalan" seolah semua itu global,
+  padahal tidak). Sebelum selesai, baca ULANG kode Anda baris per baris,
+  dan untuk SETIAP nama yang dipakai (hook React, component custom, icon,
+  type/interface dari file lain) PASTIKAN ada baris import-nya di paling
+  atas file. Kalau pakai useState/useEffect/useMemo/dst dari React, WAJIB
+  "import { useState } from 'react'" (atau gabung: "import { useState,
+  useMemo } from 'react'"). Kalau pakai component seperti <Button>,
+  <Badge>, <Modal>, WAJIB "import { Button } from '@/components/Button'"
+  dst — SATU baris import per component yang dipakai.
 - Path dan tujuan spesifik file yang harus Anda generate SEKARANG ada di
   BAGIAN PALING BAWAH pesan user setelah semua konteks project — baca
   sampai ke situ sebelum mulai menulis.`;
