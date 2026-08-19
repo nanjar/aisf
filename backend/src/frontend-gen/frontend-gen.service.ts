@@ -32,6 +32,15 @@ const MAX_HEALING_ROUNDS = 3;
 // tag. Coverage penuh tetap direkam di ValidationResult buat visibility
 // manusia terlepas dari lolos/tidaknya threshold ini.
 const MIN_COVERAGE_PERCENT = 50; // diturunkan - self-tagging LLM tidak reliable, sering false-negative
+// Fix (postmortem: file yang sama - mis. UserSettingsForm.tsx - berulang
+// kali rusak PARAH (lupa hampir SEMUA import, puluhan error TS2304/TS17004
+// sekaligus) di banyak percobaan berbeda. Repair biasa (kasih konten rusak
+// balik ke LLM, minta "perbaiki") KURANG EFEKTIF untuk kerusakan seberat
+// ini - LLM cenderung cuma nambal sebagian, bukan benar-benar rewrite yang
+// bersih. Kalau 1 file punya error SEBANYAK INI, lebih baik generate ULANG
+// DARI NOL (pakai context penuh, BUKAN konten lama yang rusak sebagai basis)
+// daripada coba tambal.
+const SEVERE_ERROR_THRESHOLD = 8;
 
 // Sama pola dengan system prompt di prompts.ts — model default dipanggil
 // hanya buat catatan awal generationJob.create() sebelum response LLM asli
@@ -329,10 +338,38 @@ export class FrontendGenService {
           const original = fileContents.get(path);
           if (!original) continue;
           try {
+            // Fix (postmortem: file yang SAMA - mis. UserSettingsForm.tsx -
+            // berulang kali rusak PARAH, puluhan error sekaligus, di banyak
+            // percobaan berbeda. Repair biasa (kasih konten rusak + minta
+            // "perbaiki") kurang efektif untuk kerusakan seberat ini - LLM
+            // cenderung cuma nambal sebagian. Hitung berapa BARIS error yang
+            // sebut path ini; kalau melebihi ambang, REGENERATE DARI NOL
+            // (context penuh, TANPA konten lama yang rusak) alih-alih repair.
+            const errorCountForPath = errorLog.split('\n').filter((line) => line.includes(path)).length;
+            const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD;
+
+            const entry = entries.find((e) => e.path === path);
+            const dependencyFiles = (entry?.dependsOn ?? [])
+              .filter((p) => fileContents.has(p) && p !== path)
+              .map((p) => ({ path: p, content: fileContents.get(p) as string }));
+
             const repairResponse = await this.llm.generate({
-              systemPrompt: repairSystemPrompt,
-              userPrompt: buildRepairUserPrompt({ path, originalContent: original, errorLog }),
-              promptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
+              systemPrompt: isSeverelyBroken ? fileSystemPrompt : repairSystemPrompt,
+              userPrompt: isSeverelyBroken
+                ? buildFileUserPrompt({
+                    prdContent: prdStage.content,
+                    architectureContent: archStage.content,
+                    uiuxCombined,
+                    backendSummary,
+                    manifestOverview,
+                    dependencyFiles,
+                    fileInfo: {
+                      path,
+                      purpose: `${entry?.purpose ?? ''} (REGENERATE DARI NOL — percobaan sebelumnya rusak parah dengan ${errorCountForPath} baris error, JANGAN pertahankan struktur lama, tulis ulang bersih dari awal, PASTIKAN semua import lengkap)`,
+                    },
+                  })
+                : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
+              promptVersion: isSeverelyBroken ? FRONTEND_FILE_PROMPT_VERSION : FRONTEND_REPAIR_PROMPT_VERSION,
               maxTokens: 16384,
             });
             totalInputTokens += repairResponse.inputTokens;
