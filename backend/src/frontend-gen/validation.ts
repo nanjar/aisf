@@ -190,6 +190,34 @@ function extractIds(yamlContent: string, listKey: string): string[] {
   }
 }
 
+/** Fix (postmortem coverage self-tagging tidak reliable) — ambil {id, route} sekaligus buat screens, dipakai inferensi path. */
+function extractScreenRoutes(yamlContent: string): { id: string; route: string }[] {
+  try {
+    const parsed = yaml.load(yamlContent) as Record<string, unknown>;
+    const list = Array.isArray(parsed?.screens) ? parsed.screens : Array.isArray(parsed) ? parsed : [];
+    return (list as unknown[])
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const obj = item as Record<string, unknown>;
+        const id = typeof obj.id === 'string' ? obj.id : null;
+        const route = typeof obj.route === 'string' ? obj.route : null;
+        return id && route ? { id, route } : null;
+      })
+      .filter((x): x is { id: string; route: string } => x !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** Route Next.js App Router ("/projects/:id" atau "/projects/[id]") -> path page.tsx yang diharapkan. */
+function routeToExpectedPagePath(route: string): string {
+  const segments = route
+    .split('/')
+    .filter(Boolean)
+    .map((seg) => (seg.startsWith(':') ? `[${seg.slice(1)}]` : seg)); // dukung dua gaya penulisan route
+  return segments.length > 0 ? `app/${segments.join('/')}/page.tsx` : 'app/page.tsx';
+}
+
 export interface CoverageResult {
   totalScreens: number;
   coveredScreens: number;
@@ -202,10 +230,22 @@ export interface CoverageResult {
 
 /**
  * §48 UI/UX Implementation Validation — Screen Coverage & Component Coverage.
- * Best-effort: cocokkan id di screens.yaml/components.yaml terhadap
- * screenId/componentId yang LLM tandai sendiri di manifest saat generate
- * (bukan AST-parsing kode React sungguhan — itu jauh lebih berat, ini
- * pendekatan pragmatis yang tetap menegakkan §18 kontrak UI/UX).
+ *
+ * Fix kritikal (postmortem: self-tagging screenId/componentId oleh LLM
+ * TIDAK RELIABLE — kadang 63%, kadang jatuh ke 7% untuk manifest yang
+ * SEBENARNYA lengkap filenya, tergantung provider/model/keberuntungan
+ * saat itu). Sekarang PAKAI DUA LAPIS deteksi:
+ *   1. Self-tagging LLM (screenId/componentId di manifest) — tetap prioritas
+ *      utama kalau LLM benar mengisinya.
+ *   2. INFERENSI DARI PATH — kalau self-tagging kosong, coba cocokkan:
+ *      - Screen: path file (mis. "app/admin/dashboard/page.tsx") terhadap
+ *        "route" di screens.yaml (mis. "/admin/dashboard") pakai konversi
+ *        App Router standar.
+ *      - Component: nama file di folder components/ (mis. "Button.tsx")
+ *        dicocokkan case-insensitive terhadap id di components.yaml
+ *        (mis. "button").
+ * Ini jauh lebih robust — tidak bergantung LLM "ingat" isi tag, cukup file
+ * fisiknya benar-benar ada di tempat yang benar.
  */
 export function checkUiuxCoverage(entries: ManifestFileEntry[], uiuxCombined: string): CoverageResult {
   const screensYaml = extractUiuxSection(uiuxCombined, 'screens.yaml') ?? '';
@@ -213,9 +253,26 @@ export function checkUiuxCoverage(entries: ManifestFileEntry[], uiuxCombined: st
 
   const screenIds = extractIds(screensYaml, 'screens');
   const componentIds = extractIds(componentsYaml, 'components');
+  const screenRoutes = extractScreenRoutes(screensYaml);
 
+  // Lapis 1: self-tagging LLM.
   const coveredScreenIds = new Set(entries.map((e) => e.screenId).filter((id): id is string => !!id));
   const coveredComponentIds = new Set(entries.map((e) => e.componentId).filter((id): id is string => !!id));
+
+  // Lapis 2: inferensi path — hanya proses screen/component yang BELUM ke-cover lewat self-tagging.
+  const entryPathsLower = new Set(entries.map((e) => e.path.toLowerCase()));
+  for (const { id, route } of screenRoutes) {
+    if (coveredScreenIds.has(id)) continue;
+    const expectedPath = routeToExpectedPagePath(route).toLowerCase();
+    if (entryPathsLower.has(expectedPath)) coveredScreenIds.add(id);
+  }
+  for (const entry of entries) {
+    const match = entry.path.match(/(?:^|\/)components\/([^/]+)\.tsx?$/i);
+    if (!match) continue;
+    const fileStem = match[1].toLowerCase();
+    const matchingId = componentIds.find((id) => id.toLowerCase() === fileStem);
+    if (matchingId) coveredComponentIds.add(matchingId);
+  }
 
   const missingScreens = screenIds.filter((id) => !coveredScreenIds.has(id));
   const missingComponents = componentIds.filter((id) => !coveredComponentIds.has(id));
