@@ -1,6 +1,6 @@
 export const FRONTEND_MANIFEST_PROMPT_VERSION = 'frontend-manifest-v4';
-export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v4';
-export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v4';
+export const FRONTEND_FILE_PROMPT_VERSION = 'frontend-file-generator-v5';
+export const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v5';
 
 const TECH_STACK = 'Next.js 14 (App Router), TypeScript, TailwindCSS, Radix UI, Recharts untuk chart.';
 
@@ -17,6 +17,10 @@ Manifest HARUS mencakup:
 - File config dasar: package.json (WAJIB ada script "build" yang jalankan
   "next build" sungguhan — validator akan jalankan npm run build asli),
   tsconfig.json, tailwind.config.ts, .env.example, app/layout.tsx.
+- lib/utils.ts — WAJIB ada di manifest secara eksplisit (jangan biarkan
+  dirujuk implisit tanpa entry manifest), berisi HANYA fungsi util kecil
+  seperti "cn()" untuk gabung className Tailwind. Lihat instruksi detail
+  di file-generation-nya nanti.
 - TEPAT SATU file page untuk SETIAP screen yang terdaftar di screens.yaml
   (path Next.js App Router mengikuti "route" di screens.yaml, mis. route
   "/projects/:id" -> app/projects/[id]/page.tsx). JANGAN skip satupun,
@@ -78,8 +82,9 @@ jawaban asli):
   "dependsOn": ["path file lain yang isinya WAJIB dibaca — MAKSIMAL 3 path
   paling penting saja"]}
 - URUTAN DI JSON: taruh package.json, tsconfig.json, tailwind.config.ts,
-  app/layout.tsx DI PALING AWAL array — supaya kalau output ke-truncate,
-  file wajib ini tetap aman. Urutan generate sebenarnya dari "dependsOn".
+  app/layout.tsx, lib/utils.ts DI PALING AWAL array — supaya kalau output
+  ke-truncate, file wajib ini tetap aman. Urutan generate sebenarnya dari
+  "dependsOn".
 - JAGA TOTAL PANJANG OUTPUT — purpose sesingkat mungkin, dependsOn seminim
   mungkin, supaya SELURUH manifest selesai dalam satu response.`;
 
@@ -110,7 +115,7 @@ export function buildManifestUserPrompt(params: {
   if (params.revisionNote) {
     sections.push(``, `# REVISION REQUESTED`, `Manifest sebelumnya perlu diperbaiki sesuai feedback berikut:`, params.revisionNote);
   }
-  sections.push(``, `Balas LANGSUNG dengan JSON array-nya, mulai dari karakter "[" — tanpa basa-basi apapun sebelumnya. Ingat: SETIAP file component WAJIB punya componentId terisi, jangan dikosongkan; JANGAN import package npm yang tidak tercantum di package.json.`);
+  sections.push(``, `Balas LANGSUNG dengan JSON array-nya, mulai dari karakter "[" — tanpa basa-basi apapun sebelumnya. Ingat: SETIAP file component WAJIB punya componentId terisi, jangan dikosongkan; JANGAN import package npm yang tidak tercantum di package.json; sertakan lib/utils.ts secara eksplisit.`);
   return sections.join('\n');
 }
 
@@ -184,18 +189,35 @@ pasti familiar. PENTING: package.json ini jadi SATU-SATUNYA sumber
 kebenaran dependency untuk SELURUH project — file lain HANYA boleh import
 package yang tercantum di sini.\n`;
 
-// Fix biaya (postmortem: 1x generate ~90 file = $3.89 — mahal padahal
-// DeepSeek native SEHARUSNYA otomatis dapat context caching 98% lebih murah
-// untuk prefix yang identik ANTAR PANGGILAN. Root cause: system prompt
-// SEBELUMNYA selalu interpolasi fileInfo.path/purpose LANGSUNG di dalamnya
-// — beda tiap file, jadi PERSIS di awal request (system message SELALU di
-// posisi pertama di array messages OpenAI-compatible), mematahkan cache
-// SEBELUM konten besar yang identik (PRD/Architecture/UIUX) sempat
-// ke-match. Fix: system prompt sekarang 100% STATIS (sama persis tiap
-// panggilan dalam 1 project), info spesifik file (path/purpose/hint)
-// dipindah ke PALING BAWAH user prompt — supaya prefix identik (system +
-// sebagian besar user prompt) sepanjang mungkin sebelum ketemu bagian yang
-// berubah-ubah, memaksimalkan cache-hit DeepSeek.
+// Fix kritikal (postmortem FATAL berulang: lib/utils.ts membengkak jadi
+// 1950 baris, lalu 2796 baris di percobaan berikutnya — bukan file kecil
+// yang dimaksud, LLM terus menambahkan isi sampai rusak/timpang tindih
+// deklarasi fungsi. Ini file yang PALING SERING dirujuk banyak component
+// (lewat "@/lib/utils"), jadi kalau dia rusak, TSC ikut bingung resolve
+// module untuk PULUHAN file lain sekaligus — cascading failure). Kasih
+// instruksi SANGAT PRESKRIPTIF, bukan cuma "jaga ringkas" — beri TAHU
+// PERSIS isinya yang diharapkan, supaya tidak ada ruang LLM berimprovisasi
+// jadi berlebihan.
+const UTILS_HINT = `\nPENTING soal lib/utils.ts (postmortem FATAL: file ini pernah membengkak
+sampai 2796 baris dan rusak — file ini WAJIB TETAP KECIL, MAKSIMAL 30 BARIS):
+- Isi HARUS PERSIS pola standar berikut (shadcn/ui convention), JANGAN
+  tambah fungsi lain apapun kecuali benar-benar ada bukti KUAT dari UI/UX
+  spec yang secara eksplisit butuh utility lain:
+
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+- Pastikan "clsx" dan "tailwind-merge" ADA di package.json dependencies
+  (kalau file dependency package.json dilampirkan, cek — kalau tidak ada,
+  tetap tulis kode di atas, package.json akan diperbaiki terpisah).
+- JANGAN tambahkan fungsi format tanggal, format currency, validasi, dst
+  di file ini — itu HARUS jadi file util TERPISAH (mis. lib/date.ts,
+  lib/format.ts) kalau memang dibutuhkan, BUKAN ditumpuk di lib/utils.ts.\n`;
+
 export function buildFileSystemPrompt(): string {
   return `Anda adalah AI Frontend Developer di AI Software Factory. Stack: ${TECH_STACK}
 
@@ -245,6 +267,7 @@ export function buildFileUserPrompt(params: {
 
   const packageJsonHint = params.fileInfo.path === 'package.json' ? PACKAGE_JSON_HINT : '';
   const apiHint = params.fileInfo.path.includes('lib/api') ? API_CLIENT_HINT : '';
+  const utilsHint = params.fileInfo.path.includes('lib/utils') ? UTILS_HINT : '';
   sections.push(
     ``,
     `# ===== FILE YANG HARUS DIGENERATE SEKARANG =====`,
@@ -252,6 +275,7 @@ export function buildFileUserPrompt(params: {
     `Tujuan file ini: ${params.fileInfo.purpose}`,
     packageJsonHint,
     apiHint,
+    utilsHint,
   );
 
   return sections.join('\n');
@@ -275,6 +299,18 @@ react-hook-form, next-auth, sonner) yang dipakai file LAIN tapi tidak ada
 di package.json ini: TAMBAHKAN package itu ke dependencies dengan versi
 yang wajar (mis. "^7.0.0" untuk react-hook-form) — JANGAN hapus/ubah
 import di file lain, package.json yang harus menyesuaikan.
+
+Kalau file ini "lib/utils.ts" dan error soal syntax rusak (function
+declaration duplikat, "implementation is missing", dst): file ini KEMUNGKINAN
+BESAR membengkak jadi ratusan/ribuan baris tanpa perlu. TULIS ULANG DARI NOL
+jadi HANYA pola standar berikut, JANGAN pertahankan isi lama:
+
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 Kalau error-nya soal JSX (TS17008 "no corresponding closing tag", TS1005
 "'/' expected" atau "'</' expected"): itu tanda ada tag pembuka yang tidak
