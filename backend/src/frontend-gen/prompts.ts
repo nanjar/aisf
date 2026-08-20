@@ -272,6 +272,17 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   tujuan navigasi, DAN sertakan "roles" (array role yang boleh lihat menu
   ini, mis. ["ADMIN"] atau ["ADMIN","SUPERVISOR"] - kosongkan/isi semua
   role kalau menu itu untuk semua orang).
+- KONVENSI BAKU PROP UNTUK SupervisorAssignmentForm - WAJIB PERSIS SAMA DI
+  SELURUH PROJECT (postmortem FATAL: 2 file BERBEDA konsisten kirim
+  props/argumen yang tidak cocok - "onAssign" dianggap wajib oleh 1 file
+  tapi tidak disediakan di file lain, "onSubmit" dipanggil dengan jumlah
+  argumen berbeda-beda antar file). SupervisorAssignmentForm WAJIB terima
+  prop-prop berikut PERSIS nama ini: "teams" (array {value: string,
+  label: string}), "initialTeamId" (optional string), "supervisors"
+  (array {value: string, label: string}), "onSubmit" (function menerima
+  SATU argumen objek "{ teamId: string; supervisorId: string; note?:
+  string }" — BUKAN 2 argumen terpisah), "onCancel" (function). JANGAN
+  pakai nama prop "onAssign" - konsisten pakai "onSubmit".
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
