@@ -449,6 +449,17 @@ sebelum function/component berakhir. Tulis ULANG STRUKTUR JSX-nya dari nol
 dengan indentasi rapi kalau perlu — jangan cuma tempel penutup di akhir
 tanpa mastikan urutan nesting-nya benar.
 
+Kalau error-nya "Property assignment expected" (TS1136), "Identifier
+expected" (TS1003), atau "':' expected" (TS1005) yang MENGELOMPOK di area
+kecil (mis. 5-10 baris berdekatan): itu tanda OBJECT LITERAL yang salah
+format - ada key tanpa titik dua/koma, atau ada baris yang lupa dipisah
+koma dari baris sebelumnya. Baca ULANG bagian tersebut baris per baris,
+pastikan SETIAP key object punya format "namaKey: nilai," (titik dua
+setelah nama key, koma setelah nilai kecuali entry terakhir). Tulis ULANG
+seluruh object literal itu dari nol dengan format yang benar kalau perlu,
+jangan cuma tempel titik dua/koma yang hilang tanpa mastikan seluruh
+struktur object-nya valid.
+
 Kalau error-nya "has no exported member 'X'" atau "has no default export"
 (TS2305/TS2613/TS2614): ini soal KONVENSI EXPORT yang tidak konsisten.
 File component React di folder components/ WAJIB pakai NAMED EXPORT
