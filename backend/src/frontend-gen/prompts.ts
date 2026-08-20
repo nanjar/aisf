@@ -206,6 +206,23 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
     - JANGAN "children", JANGAN "description"), "variant" (union
     "success"|"warning"|"danger"|"info" - JANGAN "type", samakan dengan
     konvensi variant di atas), "onClose" (function).
+- KONVENSI BAKU PROP UNTUK Tabs DAN SelectField/Select - WAJIB PERSIS SAMA
+  DI SELURUH PROJECT (postmortem FATAL: 3 file BERBEDA konsisten menebak
+  prop "tabs" untuk component Tabs, tapi component-nya sendiri TIDAK
+  menyediakan prop itu - dan SelectField diperlakukan banyak file seolah
+  menerima "children" seperti elemen <option> HTML asli, padahal harusnya
+  terima array data):
+  - Tabs WAJIB terima prop-prop berikut PERSIS nama ini: "tabs" (array of
+    {id: string, label: string, badge?: number}), "activeTab" (string),
+    "onChange" (function menerima 1 argumen string id tab), "variant"
+    (optional). JANGAN pakai pola children ("<Tabs><Tab .../></Tabs>").
+  - SelectField/Select WAJIB terima prop-prop berikut PERSIS nama ini:
+    "label" (string), "value" (string), "onChange" (function menerima 1
+    argumen string value baru - BUKAN ChangeEvent), "options" (array of
+    {value: string, label: string}), "placeholder" (optional string),
+    "error" (optional string), "required" (optional boolean). JANGAN pakai
+    pola children ("<SelectField><option>...</option></SelectField>") -
+    render <option> INTERNAL di dalam component dari prop "options".
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
