@@ -4,6 +4,7 @@ import { DeepSeekProvider } from './providers/deepseek.provider';
 import { QwenProvider } from './providers/qwen.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { OpenRouterProvider } from './providers/openrouter.provider';
+import { ClaudeProvider } from './providers/claude.provider';
 import { GenerationRequest, GenerationResponse, LLMProvider } from './types';
 
 /**
@@ -27,12 +28,14 @@ export class LLMService {
     qwen: QwenProvider,
     gemini: GeminiProvider,
     openrouter: OpenRouterProvider,
+    claude: ClaudeProvider,
   ) {
     this.providers = new Map<string, LLMProvider>([
       [deepseek.name, deepseek],
       [qwen.name, qwen],
       [gemini.name, gemini],
       [openrouter.name, openrouter],
+      [claude.name, claude],
     ]);
     this.defaultProviderName = this.config.get<string>('LLM_DEFAULT_PROVIDER', 'deepseek');
   }
@@ -40,13 +43,11 @@ export class LLMService {
   async generate(request: GenerationRequest, providerName?: string): Promise<GenerationResponse> {
     const name = providerName ?? this.defaultProviderName;
     const provider = this.providers.get(name);
-
     if (!provider) {
       throw new Error(
         `LLM provider '${name}' tidak terdaftar. Provider tersedia: ${[...this.providers.keys()].join(', ')}`,
       );
     }
-
     return provider.generate(request);
   }
 
