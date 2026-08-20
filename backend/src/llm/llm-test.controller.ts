@@ -17,12 +17,14 @@ export class LLMTestController {
 
   @Post('test')
   async test(@Body() dto: TestGenerateDto) {
-    const result = await this.llm.generate({
-      systemPrompt: 'You are a helpful assistant. Reply in one short sentence.',
-      userPrompt: dto.prompt,
-      promptVersion: 'llm-connectivity-test-v1',
-    });
-
+    const result = await this.llm.generate(
+      {
+        systemPrompt: 'You are a helpful assistant. Reply in one short sentence.',
+        userPrompt: dto.prompt,
+        promptVersion: 'llm-connectivity-test-v1',
+      },
+      dto.provider,
+    );
     return {
       provider: result.provider,
       model: result.model,
