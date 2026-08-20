@@ -178,6 +178,19 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   string) — ini pola React paling umum dipakai file lain secara alami.
   Kalau memang perlu prop "label" juga (mis. untuk aksesibilitas), buat
   keduanya optional dan render salah satu (children diutamakan kalau ada).
+- KONVENSI BAKU NAMA "variant"/STATUS UNTUK Badge/StatusBadge/Alert DAN
+  SEJENISNYA - WAJIB SAMA PERSIS DI SELURUH PROJECT (postmortem FATAL:
+  puluhan error "Type 'error' is not assignable to type ...'danger'..." -
+  sebagian file pakai kata "error", sebagian lain component-nya didefinisikan
+  pakai "danger" untuk MAKNA YANG SAMA, jadi antar file saling tidak
+  cocok). Prop "variant" (atau "status"/"color") pada component seperti ini
+  WAJIB PERSIS pakai union type berikut, TIDAK ADA VARIASI LAIN:
+  "success" | "warning" | "danger" | "info" | "neutral"
+  - PAKAI "danger" UNTUK KONDISI GAGAL/ERROR/DITOLAK, JANGAN PERNAH tulis
+    "error" (walau secara bahasa mirip, harus konsisten "danger").
+  - Component Badge/StatusBadge WAJIB terima prop bernama PERSIS "variant"
+    (bukan "color", bukan "status") dengan union type di atas - SEMUA file
+    lain yang memakainya akan menebak nama prop ini "variant" secara alami.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
