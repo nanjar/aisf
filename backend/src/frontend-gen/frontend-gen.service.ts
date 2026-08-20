@@ -332,6 +332,21 @@ export class FrontendGenService {
         const { filesToRepair, filesToCreate } = this.resolveModuleErrors(errorLog, knownPaths);
         for (const p of filesToRepair) if (!brokenPaths.includes(p)) brokenPaths.push(p);
 
+        // Fix kritikal BARU (postmortem: puluhan error TS2322/TS2739/TS2741
+        // "Property 'message'/'variant'/dst does not exist on type
+        // 'XxxProps'" atau "is missing in type ... required in type
+        // 'XxxProps'" — self-healing SEBELUMNYA cuma coba perbaiki file yang
+        // MEMAKAI component (mis. swap-requests/page.tsx), TIDAK PERNAH
+        // sadar bahwa akar masalahnya ada di component itu SENDIRI
+        // (Xxx.tsx) yang prop-nya didefinisikan beda dari konvensi yang
+        // diminta di prompts.ts. Hasilnya: perbaikan jadi main kejar-kejaran
+        // — banyak page "diselaraskan" ke component yang salah, bukan
+        // component-nya yang diperbaiki ke konvensi yang benar. Deteksi
+        // pola "XxxProps" di error, cari file component "Xxx.tsx" yang
+        // cocok, WAJIB diperbaiki LEBIH DULU sebelum coba fix consumer.
+        const componentFilesToFix = this.resolveComponentPropMismatches(errorLog, knownPaths);
+        for (const p of componentFilesToFix) if (!brokenPaths.includes(p)) brokenPaths.push(p);
+
         if (brokenPaths.length === 0 && filesToCreate.length === 0) break;
 
         for (const path of brokenPaths.slice(0, 25)) {
@@ -347,14 +362,22 @@ export class FrontendGenService {
             // (context penuh, TANPA konten lama yang rusak) alih-alih repair.
             const errorCountForPath = errorLog.split('\n').filter((line) => line.includes(path)).length;
             const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD;
+            const isComponentPropFix = componentFilesToFix.includes(path);
 
             const entry = entries.find((e) => e.path === path);
             const dependencyFiles = (entry?.dependsOn ?? [])
               .filter((p) => fileContents.has(p) && p !== path)
               .map((p) => ({ path: p, content: fileContents.get(p) as string }));
 
+            // Fix baru: repair khusus untuk component yang prop-nya
+            // mismatch dengan konsumer — user prompt-nya BEDA dari repair
+            // biasa (repair biasa asumsikan error ADA DI FILE INI, padahal
+            // di sini error justru muncul di file LAIN yang MEMAKAI
+            // component ini — perlu instruksi eksplisit itu).
+            const componentPropFixUserPrompt = `# Path file\n${path}\n\n# Isi file saat ini\n${original}\n\n# KONTEKS PENTING\nFile ini adalah SHARED COMPONENT. File-file LAIN yang memakai component ini gagal build karena prop yang Anda definisikan di file ini TIDAK COCOK dengan cara file lain memakainya (nama prop beda, atau prop wajib yang tidak Anda sediakan). Selaraskan definisi props di file ini ke KONVENSI BAKU yang sudah dijelaskan di system prompt (nama variant/message/description dst) — JANGAN ubah nama export/component utamanya, cukup perbaiki interface Props-nya.\n\n# Error log dari file-file LAIN yang memakai component ini\n${errorLog}\n\nPerbaiki interface Props di file ini supaya cocok dengan konvensi baku DAN dengan cara file lain memakainya.`;
+
             const repairResponse = await this.llm.generate({
-              systemPrompt: isSeverelyBroken ? fileSystemPrompt : repairSystemPrompt,
+              systemPrompt: isSeverelyBroken || isComponentPropFix ? fileSystemPrompt : repairSystemPrompt,
               userPrompt: isSeverelyBroken
                 ? buildFileUserPrompt({
                     prdContent: prdStage.content,
@@ -368,7 +391,9 @@ export class FrontendGenService {
                       purpose: `${entry?.purpose ?? ''} (REGENERATE DARI NOL — percobaan sebelumnya rusak parah dengan ${errorCountForPath} baris error, JANGAN pertahankan struktur lama, tulis ulang bersih dari awal, PASTIKAN semua import lengkap)`,
                     },
                   })
-                : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
+                : isComponentPropFix
+                  ? componentPropFixUserPrompt
+                  : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
               promptVersion: isSeverelyBroken ? FRONTEND_FILE_PROMPT_VERSION : FRONTEND_REPAIR_PROMPT_VERSION,
               // Fix (postmortem: file besar seperti reports/page.tsx - 730
               // baris - tetap "Unterminated template literal" walau SUDAH
@@ -625,6 +650,37 @@ export class FrontendGenService {
     }
 
     return { filesToRepair: [...filesToRepair], filesToCreate: [...filesToCreate] };
+  }
+
+  /**
+   * Fix kritikal BARU (postmortem: puluhan error TS2322/TS2339/TS2739/TS2741
+   * "Property 'X' does not exist on type 'XxxProps'" atau "required in type
+   * 'XxxProps'" — SEBELUMNYA self-healing cuma coba perbaiki file
+   * KONSUMEN (mis. page yang memakai <ConfirmDialog>), bukan component
+   * SUMBER-nya (ConfirmDialog.tsx) yang props-nya sebenarnya salah
+   * didefinisikan. Deteksi nama type "XxxProps" di error, cocokkan ke file
+   * "components/Xxx.tsx" (case-insensitive) di manifest — itulah file yang
+   * SEHARUSNYA diperbaiki duluan (definisi props-nya, bukan cara pakainya).
+   */
+  private resolveComponentPropMismatches(errorLog: string, knownPaths: string[]): string[] {
+    const found = new Set<string>();
+    const componentFileByLowerStem = new Map<string, string>();
+    for (const path of knownPaths) {
+      const match = path.match(/(?:^|\/)components\/([^/]+)\.tsx?$/i);
+      if (match) componentFileByLowerStem.set(match[1].toLowerCase(), path);
+    }
+
+    // Cocok utk "XxxProps" yang muncul sebagai bagian dari nama type di
+    // error TS2322/TS2339/TS2739/TS2741 (mis. "IntrinsicAttributes &
+    // BadgeProps", "required in type 'ConfirmDialogProps'", dst).
+    const pattern = /\b([A-Z][A-Za-z0-9]*)Props\b/g;
+    for (const match of errorLog.matchAll(pattern)) {
+      const componentName = match[1]; // mis. "Badge", "ConfirmDialog", "Toast"
+      const componentPath = componentFileByLowerStem.get(componentName.toLowerCase());
+      if (componentPath) found.add(componentPath);
+    }
+
+    return [...found];
   }
 
   private buildSummary(entries: ManifestFileEntry[], projectName: string, coverage: ReturnType<typeof checkUiuxCoverage>): string {
