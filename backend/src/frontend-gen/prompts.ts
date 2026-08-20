@@ -237,6 +237,31 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   - File yang PAKAI DateRangePicker: state penampung HARUS bertipe objek
     "{ start: string; end: string }" (via useState), BUKAN string tunggal
     - kalau butuh 1 tanggal saja, tetap gunakan objek dengan start=end sama.
+- SEMUA COMPONENT SHARED WAJIB TERIMA PROP OPTIONAL "className" (postmortem
+  FATAL: berulang kali file lain kirim "className" ke SelectField/Alert/dst
+  untuk override styling, tapi component-nya tidak menyediakan prop itu -
+  "Property 'className' does not exist"). WAJIB tambahkan
+  "className?: string" ke SEMUA interface Props component shared, lalu
+  gabungkan ke className internal (pakai fungsi cn() dari lib/utils) -
+  TANPA KECUALI, bahkan kalau terasa tidak akan dipakai.
+- KONVENSI BAKU onChange UNTUK TextArea - SAMA PERSIS DENGAN SelectField/
+  Select (postmortem FATAL: separuh file expect TextArea onChange terima
+  "(value: string) => void", separuh lain expect
+  "(e: ChangeEvent<HTMLTextAreaElement>) => void" - tidak konsisten).
+  TextArea WAJIB terima onChange bertipe
+  "(value: string) => void" (BUKAN ChangeEvent) - component-nya sendiri
+  yang extract e.target.value secara internal sebelum panggil onChange.
+- TYPE DOMAIN (Team, TeamMember, RosterEntry, CalendarAssignment, Shift,
+  User, dst) WAJIB DIDEFINISIKAN SATU KALI SAJA DAN DIPAKAI ULANG - JANGAN
+  redefinisi type yang sama di banyak file dengan shape berbeda-beda
+  (postmortem FATAL: puluhan error "Property 'shiftPattern'/'employeeNumber'
+  does not exist" karena component dan page yang memakainya masing-masing
+  punya definisi Team/TeamMember SENDIRI-SENDIRI yang tidak identik). Kalau
+  ada file "lib/types.ts" atau serupa di dependency yang dilampirkan, WAJIB
+  import type domain dari situ, JANGAN deklarasi ulang interface lokal
+  dengan nama yang sama. Kalau belum ada file types.ts, JADIKAN Backend API
+  Contract di atas sebagai SATU-SATUNYA sumber kebenaran bentuk data
+  (field apa saja yang ADA), jangan mengarang/menghilangkan field.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
