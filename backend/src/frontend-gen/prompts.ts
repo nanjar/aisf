@@ -223,6 +223,20 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
     "error" (optional string), "required" (optional boolean). JANGAN pakai
     pola children ("<SelectField><option>...</option></SelectField>") -
     render <option> INTERNAL di dalam component dari prop "options".
+- KONVENSI BAKU onChange UNTUK DateRangePicker - WAJIB PERSIS SAMA DI
+  SELURUH PROJECT (postmortem FATAL: 4 file BERBEDA konsisten memanggil
+  onChange DateRangePicker seolah mengirim SATU STRING tanggal tunggal,
+  padahal component-nya seharusnya mengirim OBJEK range {start, end} -
+  bikin error "Argument of type 'string' is not assignable to parameter
+  of type 'SetStateAction<{ start: string; end: string; }>'"):
+  - DateRangePicker WAJIB panggil onChange dengan SATU argumen objek
+    "{ start: string; end: string }" (bukan 2 argumen terpisah, bukan
+    string tunggal) - value tanggal dalam format ISO string "YYYY-MM-DD".
+  - Prop DateRangePicker WAJIB: "value" ({start: string; end: string}),
+    "onChange" (function menerima 1 argumen objek {start, end} di atas).
+  - File yang PAKAI DateRangePicker: state penampung HARUS bertipe objek
+    "{ start: string; end: string }" (via useState), BUKAN string tunggal
+    - kalau butuh 1 tanggal saja, tetap gunakan objek dengan start=end sama.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
