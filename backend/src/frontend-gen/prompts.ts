@@ -191,6 +191,21 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   - Component Badge/StatusBadge WAJIB terima prop bernama PERSIS "variant"
     (bukan "color", bukan "status") dengan union type di atas - SEMUA file
     lain yang memakainya akan menebak nama prop ini "variant" secara alami.
+- KONVENSI BAKU PROP UNTUK ConfirmDialog DAN Toast - WAJIB PERSIS SAMA DI
+  SELURUH PROJECT (postmortem FATAL: puluhan error "Property 'message'/
+  'description'/'type' is missing/does not exist" - hampir SETIAP file
+  yang pakai 2 component ini menebak nama prop BERBEDA-BEDA, tidak pernah
+  konsisten dengan definisi aslinya):
+  - ConfirmDialog WAJIB terima prop-prop berikut PERSIS nama ini: "open"
+    (boolean), "title" (string), "description" (string - JANGAN "message"),
+    "confirmLabel" (string), "cancelLabel" (string), "variant" (optional,
+    union "danger"|"warning"|"neutral" - dipakai buat warna tombol confirm),
+    "loading" (optional boolean), "onConfirm" (function, boleh async),
+    "onCancel" (function).
+  - Toast WAJIB terima prop-prop berikut PERSIS nama ini: "message" (string
+    - JANGAN "children", JANGAN "description"), "variant" (union
+    "success"|"warning"|"danger"|"info" - JANGAN "type", samakan dengan
+    konvensi variant di atas), "onClose" (function).
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
