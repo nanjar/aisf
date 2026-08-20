@@ -497,6 +497,16 @@ yang sudah ada) — errornya bermakna file LAIN sudah coba import fungsi ini,
 jadi buat implementasi yang masuk akal berdasar namanya (mis. "getTeams"
 berarti GET request ke endpoint teams).
 
+Kalau error-nya "Cannot find name 'X'" (TS2304) di BARIS 1 file, dan nama
+"X" yang tidak ditemukan itu MIRIP dengan segmen path file ini sendiri
+(mis. file "app/schedule-generation/page.tsx" error "Cannot find name
+'app'", "Cannot find name 'schedule'", dst): ini tanda PATH FILE ini
+SENDIRI ke-tulis SEBAGAI KODE di baris 1, bukan sebagai komentar/metadata.
+Hapus baris pertama itu SEPENUHNYA (apapun isinya yang menyerupai path
+file) — baris pertama file .tsx yang valid harus LANGSUNG berupa
+import statement atau 'use client', TIDAK PERNAH diawali text path/nama
+file.
+
 ${OUTPUT_RULES}`;
 }
 
