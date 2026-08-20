@@ -262,6 +262,16 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   dengan nama yang sama. Kalau belum ada file types.ts, JADIKAN Backend API
   Contract di atas sebagai SATU-SATUNYA sumber kebenaran bentuk data
   (field apa saja yang ADA), jangan mengarang/menghilangkan field.
+- KONVENSI BAKU FIELD UNTUK SidebarItem/NavItem (dipakai di app/layout.tsx
+  atau Sidebar.tsx) - WAJIB PERSIS SAMA DI SELURUH PROJECT (postmortem
+  FATAL: layout.tsx konsisten pakai field "href" untuk item navigasi,
+  padahal type SidebarItem yang didefinisikan component-nya butuh "route"
+  DAN "roles"): SidebarItem/NavItem WAJIB berbentuk
+  { route: string; label: string; icon?: string; roles?: string[] } -
+  PAKAI "route" (BUKAN "href", BUKAN "path", BUKAN "url") untuk field
+  tujuan navigasi, DAN sertakan "roles" (array role yang boleh lihat menu
+  ini, mis. ["ADMIN"] atau ["ADMIN","SUPERVISOR"] - kosongkan/isi semua
+  role kalau menu itu untuk semua orang).
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
