@@ -85,7 +85,6 @@ export class ClaudeProvider implements LLMProvider {
         {
           model,
           max_tokens: request.maxTokens ?? 8192,
-          temperature: request.temperature ?? 0.2,
           system: [
             {
               type: 'text',
