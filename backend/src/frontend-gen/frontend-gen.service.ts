@@ -370,7 +370,15 @@ export class FrontendGenService {
                   })
                 : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
               promptVersion: isSeverelyBroken ? FRONTEND_FILE_PROMPT_VERSION : FRONTEND_REPAIR_PROMPT_VERSION,
-              maxTokens: 16384,
+              // Fix (postmortem: file besar seperti reports/page.tsx - 730
+              // baris - tetap "Unterminated template literal" walau SUDAH
+              // di-regenerate dari nol 2x berturut-turut; kemungkinan besar
+              // OUTPUT KEPOTONG karena maxTokens standar (16384) tidak cukup
+              // untuk file sebesar itu, kebetulan terpotong di tengah
+              // template literal - BUKAN salah backtick beneran. File yang
+              // di-regenerate dari nol (isSeverelyBroken) dikasih jatah token
+              // lebih besar sebagai jaring pengaman.
+              maxTokens: isSeverelyBroken ? 24576 : 16384,
             });
             totalInputTokens += repairResponse.inputTokens;
             totalOutputTokens += repairResponse.outputTokens;
@@ -384,7 +392,13 @@ export class FrontendGenService {
                   generationFileId: gf.id,
                   attemptNumber: healingRounds,
                   errorSummary: errorLog.slice(-2000),
-                  repairPromptVersion: FRONTEND_REPAIR_PROMPT_VERSION,
+                  // Fix bug pencatatan (postmortem: label ini SEBELUMNYA
+                  // selalu hardcode ke versi repair walau jalur regenerate-
+                  // dari-nol yang sebenarnya dipakai - datanya jadi
+                  // menyesatkan waktu audit "apakah fix regenerate ini
+                  // benar-benar jalan?"). Sekarang catat versi yang BENAR-
+                  // BENAR dipakai di panggilan LLM di atas.
+                  repairPromptVersion: isSeverelyBroken ? FRONTEND_FILE_PROMPT_VERSION : FRONTEND_REPAIR_PROMPT_VERSION,
                   resultStatus: GenerationFileStatus.GENERATED,
                 },
               });
