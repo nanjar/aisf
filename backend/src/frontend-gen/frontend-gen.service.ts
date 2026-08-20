@@ -347,6 +347,19 @@ export class FrontendGenService {
         const componentFilesToFix = this.resolveComponentPropMismatches(errorLog, knownPaths);
         for (const p of componentFilesToFix) if (!brokenPaths.includes(p)) brokenPaths.push(p);
 
+        // Fix kritikal BARU LAGI (postmortem: error konflik TYPE DOMAIN
+        // biasa - "Property 'shiftPattern' does not exist on type 'Team'",
+        // "TeamMember[] is not assignable to import(.../TeamMemberList).
+        // TeamMember[]" - TIDAK cocok pola "XxxProps" di atas (bukan React
+        // component props, tapi plain domain type/interface yang
+        // didefinisikan ULANG dengan shape berbeda di banyak file).
+        // TypeScript SENDIRI sudah kasih tahu PERSIS file mana sumber
+        // definisi yang konflik lewat notasi
+        // 'import("/workspace/PATH").TypeName' di pesan errornya - manfaatkan
+        // itu langsung, jauh lebih presisi daripada nebak dari nama type.
+        const typeConflictFiles = this.resolveImportedTypeConflicts(errorLog, knownPaths);
+        for (const p of typeConflictFiles) if (!brokenPaths.includes(p)) brokenPaths.push(p);
+
         if (brokenPaths.length === 0 && filesToCreate.length === 0) break;
 
         for (const path of brokenPaths.slice(0, 25)) {
@@ -363,6 +376,7 @@ export class FrontendGenService {
             const errorCountForPath = errorLog.split('\n').filter((line) => line.includes(path)).length;
             const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD;
             const isComponentPropFix = componentFilesToFix.includes(path);
+            const isTypeConflictFix = typeConflictFiles.includes(path) && !isComponentPropFix;
 
             const entry = entries.find((e) => e.path === path);
             const dependencyFiles = (entry?.dependsOn ?? [])
@@ -376,8 +390,15 @@ export class FrontendGenService {
             // component ini — perlu instruksi eksplisit itu).
             const componentPropFixUserPrompt = `# Path file\n${path}\n\n# Isi file saat ini\n${original}\n\n# KONTEKS PENTING\nFile ini adalah SHARED COMPONENT. File-file LAIN yang memakai component ini gagal build karena prop yang Anda definisikan di file ini TIDAK COCOK dengan cara file lain memakainya (nama prop beda, atau prop wajib yang tidak Anda sediakan). Selaraskan definisi props di file ini ke KONVENSI BAKU yang sudah dijelaskan di system prompt (nama variant/message/description dst) — JANGAN ubah nama export/component utamanya, cukup perbaiki interface Props-nya.\n\n# Error log dari file-file LAIN yang memakai component ini\n${errorLog}\n\nPerbaiki interface Props di file ini supaya cocok dengan konvensi baku DAN dengan cara file lain memakainya.`;
 
+            // Fix baru: repair khusus untuk file yang jadi SUMBER definisi
+            // type domain (Team/TeamMember/RosterEntry/dst) yang bentuknya
+            // TIDAK COCOK dengan file lain yang memakai type yang SAMA
+            // NAMANYA — beda dari component prop fix (ini soal TYPE/
+            // INTERFACE plain, bukan React Props).
+            const typeConflictFixUserPrompt = `# Path file\n${path}\n\n# Isi file saat ini\n${original}\n\n# KONTEKS PENTING\nFile ini mendefinisikan sebuah type/interface (mis. Team, TeamMember, RosterEntry) yang JUGA dipakai/didefinisikan berbeda di file LAIN, menyebabkan error type mismatch (lihat error log di bawah — TypeScript sebutkan file ini secara eksplisit lewat notasi import("...")). Selaraskan SHAPE type/interface di file ini supaya field-nya LENGKAP dan KONSISTEN dengan Backend API Contract yang dilampirkan di atas (field apa saja yang benar-benar ada) — JANGAN hilangkan field yang dibutuhkan file lain, JANGAN ubah nama export utama.\n\n# Error log terkait\n${errorLog}\n\nPerbaiki definisi type/interface di file ini supaya konsisten dengan Backend API Contract dan cocok dengan cara file lain memakainya.`;
+
             const repairResponse = await this.llm.generate({
-              systemPrompt: isSeverelyBroken || isComponentPropFix ? fileSystemPrompt : repairSystemPrompt,
+              systemPrompt: isSeverelyBroken || isComponentPropFix || isTypeConflictFix ? fileSystemPrompt : repairSystemPrompt,
               userPrompt: isSeverelyBroken
                 ? buildFileUserPrompt({
                     prdContent: prdStage.content,
@@ -393,7 +414,9 @@ export class FrontendGenService {
                   })
                 : isComponentPropFix
                   ? componentPropFixUserPrompt
-                  : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
+                  : isTypeConflictFix
+                    ? typeConflictFixUserPrompt
+                    : buildRepairUserPrompt({ path, originalContent: original, errorLog }),
               promptVersion: isSeverelyBroken ? FRONTEND_FILE_PROMPT_VERSION : FRONTEND_REPAIR_PROMPT_VERSION,
               // Fix (postmortem: file besar seperti reports/page.tsx - 730
               // baris - tetap "Unterminated template literal" walau SUDAH
@@ -678,6 +701,34 @@ export class FrontendGenService {
       const componentName = match[1]; // mis. "Badge", "ConfirmDialog", "Toast"
       const componentPath = componentFileByLowerStem.get(componentName.toLowerCase());
       if (componentPath) found.add(componentPath);
+    }
+
+    return [...found];
+  }
+
+  /**
+   * Fix kritikal BARU LAGI (postmortem: error konflik TYPE DOMAIN biasa -
+   * "Property 'shiftPattern' does not exist on type 'Team'",
+   * "TeamMember[] is not assignable to import(.../TeamMemberList).
+   * TeamMember[]" - beda dari resolveComponentPropMismatches di atas (bukan
+   * React component Props, tapi plain type/interface domain yang
+   * didefinisikan ULANG dengan shape berbeda di banyak file). TypeScript
+   * SENDIRI kasih tahu PERSIS file mana sumber definisi yang konflik lewat
+   * notasi 'import("/workspace/PATH").TypeName' di pesan errornya -
+   * manfaatkan itu langsung, jauh lebih presisi daripada nebak dari nama
+   * type doang (rawan salah tebak untuk nama umum seperti "User").
+   */
+  private resolveImportedTypeConflicts(errorLog: string, knownPaths: string[]): string[] {
+    const found = new Set<string>();
+    const knownSet = new Set(knownPaths);
+
+    // Cocok: import("/workspace/components/TeamMemberList").TeamMember
+    const pattern = /import\("\/workspace\/([^"]+)"\)\.\w+/g;
+    for (const match of errorLog.matchAll(pattern)) {
+      const relPath = match[1];
+      const candidates = [`${relPath}.tsx`, `${relPath}.ts`];
+      const existing = candidates.find((p) => knownSet.has(p));
+      if (existing) found.add(existing);
     }
 
     return [...found];
