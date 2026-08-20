@@ -206,6 +206,21 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
     - JANGAN "children", JANGAN "description"), "variant" (union
     "success"|"warning"|"danger"|"info" - JANGAN "type", samakan dengan
     konvensi variant di atas), "onClose" (function).
+  - WAJIB SEDIAKAN "ToastProvider" DI FILE components/Toast.tsx YANG SAMA
+    (postmortem FATAL: app/layout.tsx berulang kali import "ToastProvider"
+    - kadang dari file terpisah "@/components/ToastProvider", kadang
+    diharapkan ada di "@/components/Toast" - keduanya beda-beda, bikin
+    error "Cannot find module" atau "has no exported member"). ATURAN
+    TEGAS: "ToastProvider" WAJIB diekspor dari FILE YANG SAMA dengan
+    "Toast" itu sendiri (components/Toast.tsx), BUKAN file terpisah.
+    ToastProvider adalah React Context Provider yang: (1) menerima
+    "children: React.ReactNode", (2) sediakan cara untuk komponen lain
+    trigger toast baru (mis. via hook "useToast()" yang di-export juga
+    dari file yang sama, dengan function seperti
+    "showToast(message: string, variant: ...)"), (3) render daftar Toast
+    aktif di pojok layar (posisi fixed). app/layout.tsx akan import
+    "{ ToastProvider }" dari "@/components/Toast" dan bungkus seluruh
+    children aplikasi dengan itu.
 - KONVENSI BAKU PROP UNTUK Tabs DAN SelectField/Select - WAJIB PERSIS SAMA
   DI SELURUH PROJECT (postmortem FATAL: 3 file BERBEDA konsisten menebak
   prop "tabs" untuk component Tabs, tapi component-nya sendiri TIDAK
