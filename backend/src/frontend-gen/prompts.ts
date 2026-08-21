@@ -235,9 +235,15 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
     "label" (string), "value" (string), "onChange" (function menerima 1
     argumen string value baru - BUKAN ChangeEvent), "options" (array of
     {value: string, label: string}), "placeholder" (optional string),
-    "error" (optional string), "required" (optional boolean). JANGAN pakai
-    pola children ("<SelectField><option>...</option></SelectField>") -
-    render <option> INTERNAL di dalam component dari prop "options".
+    "error" (optional string), "required" (optional boolean), "id"
+    (optional string), "className" (optional string). JANGAN pakai pola
+    children ("<SelectField><option>...</option></SelectField>") - render
+    <option> INTERNAL di dalam component dari prop "options".
+  - NAMA FILE component ini WAJIB "components/SelectField.tsx" (postmortem
+    FATAL: pernah ke-import dari "@/components/Select" - beda file dari
+    yang benar-benar dibuat - bikin "has no exported member"). Component
+    export bernama "SelectField", file-nya JUGA HARUS "SelectField.tsx" -
+    JANGAN pakai nama file "Select.tsx".
 - KONVENSI BAKU onChange UNTUK DateRangePicker - WAJIB PERSIS SAMA DI
   SELURUH PROJECT (postmortem FATAL: 4 file BERBEDA konsisten memanggil
   onChange DateRangePicker seolah mengirim SATU STRING tanggal tunggal,
