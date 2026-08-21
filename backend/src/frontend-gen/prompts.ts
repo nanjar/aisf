@@ -272,6 +272,26 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   TextArea WAJIB terima onChange bertipe
   "(value: string) => void" (BUKAN ChangeEvent) - component-nya sendiri
   yang extract e.target.value secara internal sebelum panggil onChange.
+- KONVENSI BAKU onChange UNTUK Input/InputField - SAMA PERSIS DENGAN
+  TextArea/SelectField (postmortem FATAL: puluhan error "Type
+  'ChangeEvent<HTMLInputElement>' is not assignable to type 'string'" -
+  banyak file expect Input onChange terima ChangeEvent, padahal konvensi
+  project ini SELALU pakai value string langsung). Input/InputField WAJIB
+  terima onChange bertipe "(value: string) => void" (BUKAN ChangeEvent) -
+  component-nya sendiri yang extract e.target.value secara internal
+  sebelum panggil onChange. Prop lain: "label" (string), "value" (string),
+  "placeholder" (optional), "error" (optional string), "type" (optional,
+  default "text"), "required" (optional boolean), "disabled" (optional
+  boolean), "id" (optional string), "className" (optional string).
+- LENGKAPI HOOK "useToast()" DARI ToastProvider (postmortem FATAL: file
+  lain coba akses "toasts" (daftar toast aktif) dan "dismissToast"
+  (function tutup 1 toast tertentu) dari hasil useToast(), tapi
+  ToastProvider yang dibuat cuma sediakan "showToast" - kurang lengkap).
+  useToast() WAJIB kembalikan objek dengan field PERSIS: "toasts" (array
+  toast aktif saat ini, tiap item {id: string, message: string, variant:
+  string}), "showToast" (function(message: string, variant: string) buat
+  tambah toast baru), "dismissToast" (function(id: string) buat hapus 1
+  toast tertentu berdasar id).
 - TYPE DOMAIN (Team, TeamMember, RosterEntry, CalendarAssignment, Shift,
   User, dst) WAJIB DIDEFINISIKAN SATU KALI SAJA DAN DIPAKAI ULANG - JANGAN
   redefinisi type yang sama di banyak file dengan shape berbeda-beda
