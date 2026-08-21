@@ -178,6 +178,26 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   string) — ini pola React paling umum dipakai file lain secara alami.
   Kalau memang perlu prop "label" juga (mis. untuk aksesibilitas), buat
   keduanya optional dan render salah satu (children diutamakan kalau ada).
+- Alert WAJIB JUGA TERIMA PROP "action" (optional React.ReactNode)
+  (postmortem FATAL: 3 file BERBEDA kirim prop "action" ke Alert - biasanya
+  tombol/link tambahan di samping pesan alert - tapi AlertProps tidak
+  menyediakannya). Alert WAJIB terima props: "children" (React.ReactNode,
+  isi pesan - lihat aturan children di atas), "variant" (optional, lihat
+  konvensi variant), "title" (optional string), "action" (optional
+  React.ReactNode - render di sisi kanan/bawah alert, mis. tombol "Lihat
+  Detail" atau "Undo"), "dismissible" (optional boolean), "onDismiss"
+  (optional function).
+- JANGAN PERNAH PAKAI CONSTRAINT GENERIC "T extends Record<string,
+  unknown>" DI COMPONENT/FUNCTION APAPUN (postmortem FATAL: berulang kali
+  "Type 'XxxFormData'/'ProfileFormData'/'ShiftFormData' does not satisfy
+  the constraint 'Record<string, unknown>' - Index signature for type
+  'string' is missing" - BUKAN cuma di component Table, tapi di FUNGSI
+  GENERIC APAPUN yang menerima data form/domain sebagai parameter generic).
+  Interface/type domain project ini TIDAK PERNAH punya index signature.
+  Kalau butuh function/component generic yang menerima "data" bertipe
+  bebas, JANGAN batasi dengan "Record<string, unknown>" — pakai "T extends
+  object" (paling longgar), atau JANGAN PAKAI GENERIC SAMA SEKALI kalau
+  tidak benar-benar perlu reusable untuk banyak type berbeda.
 - KONVENSI BAKU NAMA "variant"/STATUS UNTUK Badge/StatusBadge/Alert DAN
   SEJENISNYA - WAJIB SAMA PERSIS DI SELURUH PROJECT (postmortem FATAL:
   puluhan error "Type 'error' is not assignable to type ...'danger'..." -
