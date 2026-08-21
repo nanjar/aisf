@@ -298,6 +298,28 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   SATU argumen objek "{ teamId: string; supervisorId: string; note?:
   string }" — BUKAN 2 argumen terpisah), "onCancel" (function). JANGAN
   pakai nama prop "onAssign" - konsisten pakai "onSubmit".
+- COMPONENT Table GENERIC TYPE PARAMETER JANGAN DIBATASI KE
+  "Record<string, unknown>" (postmortem FATAL: 4 file BERBEDA gagal build
+  "Type 'AuditLog'/'ReportHistoryItem'/'RosterEntry'/'UserTableUser' does
+  not satisfy the constraint 'Record<string, unknown>' - Index signature
+  for type 'string' is missing" - constraint generic Table terlalu ketat,
+  domain interface BIASA tidak punya index signature walau field-nya
+  lengkap). Kalau generate component Table yang generic (reusable untuk
+  berbagai jenis data), definisikan generic type parameter TANPA
+  constraint ketat: "function Table<T>(...)" atau constraint LONGGAR
+  seperti "function Table<T extends { id: string | number }>(...)" —
+  JANGAN PERNAH "T extends Record<string, unknown>" (itu MEMAKSA semua
+  data yang dipakai Table punya index signature, hampir tidak pernah
+  cocok dengan interface domain biasa).
+- FIELD TANGGAL DI TYPE DOMAIN WAJIB BERTIPE "string", JANGAN "Date"
+  (postmortem FATAL: berulang kali "Type 'string' is not assignable to
+  type 'Date'" - data tanggal dari Backend API SELALU berbentuk string
+  ISO 8601 lewat JSON, TIDAK PERNAH objek Date asli). Semua field tanggal/
+  waktu di interface/type (mis. "createdAt", "startTime", "date", dst)
+  WAJIB bertipe "string", BUKAN "Date". Kalau butuh manipulasi tanggal
+  (format, bandingkan, dst) di dalam component, convert ke "new Date(...)"
+  SAAT DIPAKAI SAJA secara lokal, JANGAN simpan sebagai Date di
+  state/props/interface.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
