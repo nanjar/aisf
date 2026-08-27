@@ -21,6 +21,23 @@ Manifest HARUS mencakup:
   dirujuk implisit tanpa entry manifest), berisi HANYA fungsi util kecil
   seperti "cn()" untuk gabung className Tailwind. Lihat instruksi detail
   di file-generation-nya nanti.
+- lib/types.ts — WAJIB ADA DI MANIFEST SECARA EKSPLISIT, DIGENERATE
+  PALING AWAL (bareng package.json/tsconfig.json) (postmortem FATAL PALING
+  SERING TERJADI SEPANJANG PROJECT INI: puluhan error "Type 'X' is missing
+  properties from type 'X'" — SAMA PERSIS NAMA TYPE-nya, tapi 2+ file
+  BERBEDA masing-masing MENDEFINISIKAN SENDIRI-SENDIRI shape untuk type
+  domain yang sama seperti Team/TeamMember/RosterEntry/Shift/User/
+  ShiftFormData, karena tidak ada SATU sumber kebenaran terpusat — tiap
+  file menebak shape-nya sendiri dari Backend API Contract, dan tebakannya
+  hampir selalu beda dikit). lib/types.ts WAJIB berisi SEMUA interface/type
+  domain yang dipakai LEBIH DARI SATU file (Team, TeamMember, User, Shift,
+  RosterEntry, CalendarAssignment, SwapRequest, LeaveRequest, dst — turunkan
+  field-nya PERSIS dari Backend API Contract, field APA SAJA yang benar-
+  benar ada di response API, jangan kurang jangan lebih). SETIAP file lain
+  (page ATAU component) yang menyebut nama type-type ini WAJIB
+  "import type { Team, TeamMember } from '@/lib/types'" — DILARANG KERAS
+  deklarasi "interface Team {...}" atau "type Team = {...}" ULANG di file
+  manapun selain lib/types.ts itu sendiri.
 - TEPAT SATU file page untuk SETIAP screen yang terdaftar di screens.yaml
   (path Next.js App Router mengikuti "route" di screens.yaml, mis. route
   "/projects/:id" -> app/projects/[id]/page.tsx). JANGAN skip satupun,
@@ -82,9 +99,11 @@ jawaban asli):
   "dependsOn": ["path file lain yang isinya WAJIB dibaca — MAKSIMAL 3 path
   paling penting saja"]}
 - URUTAN DI JSON: taruh package.json, tsconfig.json, tailwind.config.ts,
-  app/layout.tsx, lib/utils.ts DI PALING AWAL array — supaya kalau output
-  ke-truncate, file wajib ini tetap aman. Urutan generate sebenarnya dari
-  "dependsOn".
+  app/layout.tsx, lib/utils.ts, lib/types.ts DI PALING AWAL array — supaya
+  kalau output ke-truncate, file wajib ini tetap aman, DAN supaya
+  lib/types.ts benar-benar digenerate SEBELUM file lain yang akan
+  import darinya (lihat aturan lib/types.ts di atas). Urutan generate
+  sebenarnya dari "dependsOn".
 - JAGA TOTAL PANJANG OUTPUT — purpose sesingkat mungkin, dependsOn seminim
   mungkin, supaya SELURUH manifest selesai dalam satu response.`;
 
@@ -211,6 +230,15 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   - Component Badge/StatusBadge WAJIB terima prop bernama PERSIS "variant"
     (bukan "color", bukan "status") dengan union type di atas - SEMUA file
     lain yang memakainya akan menebak nama prop ini "variant" secara alami.
+- KONVENSI BAKU NAMA "variant" UNTUK Button - BEDA DARI Badge/StatusBadge/
+  Alert (postmortem FATAL: berulang kali "Type 'success' is not
+  assignable to type Button variant" - banyak file coba pakai "success"
+  untuk Button padahal Button TIDAK PERNAH punya variant "success", cuma
+  Badge/Alert yang punya). Button WAJIB PERSIS pakai union type berikut,
+  TIDAK ADA VARIASI LAIN: "primary" | "secondary" | "danger" | "ghost" |
+  "outline". Button TIDAK PUNYA variant "success"/"warning"/"info" -
+  untuk highlight aksi POSITIF (mis. tombol "Setujui"/"Simpan"), PAKAI
+  "primary", BUKAN "success".
 - KONVENSI BAKU PROP UNTUK ConfirmDialog DAN Toast - WAJIB PERSIS SAMA DI
   SELURUH PROJECT (postmortem FATAL: puluhan error "Property 'message'/
   'description'/'type' is missing/does not exist" - hampir SETIAP file
