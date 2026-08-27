@@ -5,7 +5,10 @@ import { ValidationResult } from '../types';
 /**
  * §11.3 — Frontend (Next.js): npm install -> tsc --noEmit -> npm run build -> PASS/FAIL
  * Lihat komentar di backend-validator.service.ts — alasan yang sama kenapa
- * 3 langkah ini digabung jadi 1 panggilan dockerRun().
+ * 3 langkah ini digabung jadi 1 panggilan dockerRun(), dan alasan yang sama
+ * kenapa build toolchain (python3/make/g++) di-install lebih dulu — Next.js
+ * project bisa saja generate dependency native (image processing, dsb) dan
+ * `node:20-slim` tidak punya toolchain untuk itu secara default.
  */
 @Injectable()
 export class FrontendValidatorService {
@@ -19,6 +22,7 @@ export class FrontendValidatorService {
       command: [
         'sh', '-c',
         'set -e; ' +
+        'echo "=== STEP 0: install build toolchain ==="; apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ > /dev/null; ' +
         'echo "=== STEP 1: npm install ==="; npm install --no-audit --no-fund; ' +
         'echo "=== STEP 2: tsc --noEmit ==="; npx tsc --noEmit; ' +
         'echo "=== STEP 3: npm run build ==="; npm run build; ' +

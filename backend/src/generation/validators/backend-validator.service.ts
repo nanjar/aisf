@@ -19,6 +19,15 @@ import { ValidationResult } from '../types';
  * Given npm install sendiri sudah butuh network dan bisa jalankan postinstall
  * script sembarang, proteksi 'none' di step lanjutan cuma proteksi parsial —
  * trade-off ini diterima demi kesederhanaan implementasi.
+ *
+ * Fix (defense-in-depth, ditemukan lewat review manual): `node:20-slim`
+ * TIDAK punya python3/make/g++. Kalau LLM tetap generate dependency native
+ * (mis. "bcrypt", walau prompt sudah diarahkan ke "bcryptjs" — lihat
+ * backend-gen/prompts.ts), `npm install` gagal/hang TANPA pesan error yang
+ * jelas — persis pola bug yang sama seperti di Dockerfile AISF sendiri.
+ * Install toolchain minimal SEBELUM npm install supaya kasus ini tidak lagi
+ * menghasilkan false negative "build gagal" yang membingungkan untuk
+ * di-debug lewat error log semata.
  */
 @Injectable()
 export class BackendValidatorService {
@@ -38,6 +47,7 @@ export class BackendValidatorService {
       command: [
         'sh', '-c',
         'set -e; ' +
+        'echo "=== STEP 0: install build toolchain ==="; apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 make g++ > /dev/null; ' +
         'echo "=== STEP 1: npm install ==="; npm install --no-audit --no-fund; ' +
         'echo "=== STEP 2: tsc --noEmit ==="; npx tsc --noEmit; ' +
         'echo "=== STEP 3: npm run build ==="; npm run build; ' +

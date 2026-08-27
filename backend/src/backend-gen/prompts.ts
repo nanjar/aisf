@@ -119,12 +119,19 @@ export function buildFileSystemPrompt(fileInfo: { path: string; purpose: string 
       ? `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
 ADA dan yakin benar (mis. "@nestjs/common", "@nestjs/core", "@nestjs/config",
 "@prisma/client", "class-validator", "class-transformer", "ioredis",
-"@nestjs-modules/ioredis", "amqplib", "bcrypt", dst — package populer dan
-umum dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
+"@nestjs-modules/ioredis", "amqplib", dst — package populer dan umum
+dipakai). JANGAN mengarang nama package yang terdengar masuk akal tapi
 tidak yakin ada (mis. "nestjs-ioredis" BUKAN package asli — yang benar
 "ioredis" langsung atau "@nestjs-modules/ioredis"). Kalau ragu apakah
 sebuah package benar-benar ada di npm, JANGAN pakai — cari alternatif yang
-sudah pasti familiar.\n`
+sudah pasti familiar.
+
+WAJIB soal password hashing: gunakan "bcryptjs" (pure JavaScript), JANGAN
+"bcrypt" (native C++ binding). Environment validasi build TIDAK punya
+python3/make/g++ untuk compile native addon — "bcrypt" akan membuat
+"npm install" gagal atau hang tanpa error yang jelas. "bcryptjs" API-nya
+sama persis (hash, hashSync, compare, compareSync) jadi tidak ada
+trade-off fungsional.\n`
       : '';
 
   return `Anda adalah AI Backend Developer di AI Software Factory. Stack: ${TECH_STACK}
