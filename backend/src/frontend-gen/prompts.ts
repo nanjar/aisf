@@ -37,7 +37,17 @@ Manifest HARUS mencakup:
   (page ATAU component) yang menyebut nama type-type ini WAJIB
   "import type { Team, TeamMember } from '@/lib/types'" — DILARANG KERAS
   deklarasi "interface Team {...}" atau "type Team = {...}" ULANG di file
-  manapun selain lib/types.ts itu sendiri.
+  manapun selain lib/types.ts itu sendiri. INI TERMASUK LARANGAN pola
+  "interface TeamMember extends ImportedTeamMember {...}" (postmortem
+  FATAL: LLM lain mengakali larangan di atas dengan cara "extends" alih-
+  alih redeklarasi langsung - secara teknis "tidak redeklarasi", tapi
+  tetap bikin 2 interface TERPISAH dengan nama sama yang shape-nya bisa
+  beda, TypeScript tetap anggap itu error "incorrectly extends interface").
+  KALAU file butuh Props component yang MEMAKAI field dari TeamMember/
+  Team/dst, JANGAN buat interface baru sama sekali untuk itu - import
+  type-nya LANGSUNG dari lib/types.ts dan PAKAI APA ADANYA di signature
+  Props (mis. "interface TeamMemberListProps { members: TeamMember[]; ...
+  }" dengan "TeamMember" hasil import, BUKAN interface baru bernama sama).
 - TEPAT SATU file page untuk SETIAP screen yang terdaftar di screens.yaml
   (path Next.js App Router mengikuti "route" di screens.yaml, mis. route
   "/projects/:id" -> app/projects/[id]/page.tsx). JANGAN skip satupun,
