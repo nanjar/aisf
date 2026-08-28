@@ -230,6 +230,15 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   - Component Badge/StatusBadge WAJIB terima prop bernama PERSIS "variant"
     (bukan "color", bukan "status") dengan union type di atas - SEMUA file
     lain yang memakainya akan menebak nama prop ini "variant" secara alami.
+- Component ShiftBadge (KHUSUS untuk shift, BEDA dari Badge/StatusBadge
+  umum) WAJIB terima prop bernama PERSIS "shiftType" (BUKAN "type", BUKAN
+  "variant") (postmortem FATAL: file lain kirim prop "type" ke ShiftBadge,
+  padahal component-nya bukan Badge generik - ShiftBadge SPESIFIK
+  menampilkan jenis shift). ShiftBadge WAJIB terima props: "shiftType"
+  (union type ShiftType dari lib/types.ts - "PAGI"|"SIANG"|"MALAM"|"OFF"|
+  dst, SAMAKAN dengan definisi ShiftType di lib/types.ts), "size"
+  (optional), "showIcon" (optional boolean), "className" (optional
+  string).
 - KONVENSI BAKU NAMA "variant" UNTUK Button - BEDA DARI Badge/StatusBadge/
   Alert (postmortem FATAL: berulang kali "Type 'success' is not
   assignable to type Button variant" - banyak file coba pakai "success"
