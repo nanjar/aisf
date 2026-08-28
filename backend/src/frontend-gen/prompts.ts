@@ -249,6 +249,19 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   dst, SAMAKAN dengan definisi ShiftType di lib/types.ts), "size"
   (optional), "showIcon" (optional boolean), "className" (optional
   string).
+- Component RotationPatternSelector WAJIB terima prop bernama PERSIS
+  "value" (postmortem FATAL: 2 file BERBEDA panggil dengan
+  "selectedPatternId" tapi component-nya minta "value" - inkonsisten
+  nama prop). RotationPatternSelector WAJIB terima props: "patterns"
+  (array RotationPattern dari lib/types.ts), "value" (string, id pattern
+  yang sedang dipilih - JANGAN "selectedPatternId"), "onChange" (function
+  menerima 1 argumen string id pattern baru), "disabled" (optional
+  boolean), "className" (optional string). RotationPattern (di
+  lib/types.ts) field "pattern" WAJIB bertipe "ShiftType[]" (array of
+  ShiftType, BUKAN string tunggal) - kalau RotationPatternSelector
+  generate data contoh/default secara internal untuk pattern, WAJIB pakai
+  array literal seperti ["PAGI", "SIANG", "MALAM"] (array), JANGAN string
+  tunggal seperti "PAGI-SIANG-MALAM".
 - KONVENSI BAKU NAMA "variant" UNTUK Button - BEDA DARI Badge/StatusBadge/
   Alert (postmortem FATAL: berulang kali "Type 'success' is not
   assignable to type Button variant" - banyak file coba pakai "success"
