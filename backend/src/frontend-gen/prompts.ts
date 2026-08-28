@@ -409,6 +409,30 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   BAGIAN PALING BAWAH pesan user setelah semua konteks project — baca
   sampai ke situ sebelum mulai menulis.`;
 
+const TYPES_HINT = `\nPENTING soal lib/types.ts (postmortem FATAL: file ini
+digenerate PALING AWAL, SEBELUM semua page/component yang akan MEMAKAINYA -
+puluhan error "Property 'employeeName'/'pattern' does not exist" dan
+"missing properties from type" karena lib/types.ts cuma isi field yang
+"kelihatan perlu" saat itu, TIDAK lengkap mencakup SEMUA field yang bakal
+dibutuhkan file lain nanti):
+- Untuk SETIAP interface/type domain, WAJIB sertakan SEMUA field yang
+  mungkin relevan berdasar Backend API Contract DAN UI/UX Design
+  Specification yang dilampirkan - JANGAN cuma field yang paling jelas
+  dipakai. Kalau ragu apakah sebuah field dibutuhkan, LEBIH BAIK
+  SERTAKAN (optional kalau tidak yakin selalu ada) daripada tidak sama
+  sekali - field berlebih JAUH lebih aman daripada field kurang (field
+  kurang bikin build gagal total di file lain, field lebih tidak
+  masalah).
+- Untuk data yang DITAMPILKAN di UI (mis. nama orang, nama shift, dst)
+  WAJIB sertakan field "display-friendly"-nya juga (mis. kalau ada
+  "employeeId", pertimbangkan juga apakah butuh "employeeName" untuk
+  ditampilkan langsung tanpa join manual - cek UI/UX spec buat screen
+  yang menampilkan data ini).
+- Baca SELURUH UI/UX Design Specification dan Backend API Contract
+  dengan teliti SEBELUM menulis type - list semua field yang disebut di
+  mockup/wireframe/response API untuk entity yang sama, gabungkan semua
+  jadi 1 interface yang lengkap.\n`;
+
 const API_CLIENT_HINT = `\nPENTING soal lib/api.ts (postmortem FATAL: file ini digenerate PALING
 AWAL, sebelum page/component lain yang akan MEMAKAINYA — puluhan file lain
 gagal build "Module @/lib/api has no exported member 'login'/'getTeams'/dst"
@@ -529,6 +553,7 @@ export function buildFileUserPrompt(params: {
   const packageJsonHint = params.fileInfo.path === 'package.json' ? PACKAGE_JSON_HINT : '';
   const apiHint = params.fileInfo.path.includes('lib/api') ? API_CLIENT_HINT : '';
   const utilsHint = params.fileInfo.path.includes('lib/utils') ? UTILS_HINT : '';
+  const typesHint = params.fileInfo.path.includes('lib/types') ? TYPES_HINT : '';
   sections.push(
     ``,
     `# ===== FILE YANG HARUS DIGENERATE SEKARANG =====`,
@@ -537,6 +562,7 @@ export function buildFileUserPrompt(params: {
     packageJsonHint,
     apiHint,
     utilsHint,
+    typesHint,
   );
 
   return sections.join('\n');
