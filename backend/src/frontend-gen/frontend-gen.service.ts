@@ -374,7 +374,19 @@ export class FrontendGenService {
             // sebut path ini; kalau melebihi ambang, REGENERATE DARI NOL
             // (context penuh, TANPA konten lama yang rusak) alih-alih repair.
             const errorCountForPath = errorLog.split('\n').filter((line) => line.includes(path)).length;
-            const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD;
+            // Fix (postmortem: lib/types.ts - 2436 baris - "Unterminated
+            // string literal" HANYA 1 baris error, jauh di bawah
+            // SEVERE_ERROR_THRESHOLD (8), jadi lolos ke jalur repair biasa
+            // (maxTokens 16384) padahal akar masalahnya SAMA PERSIS dengan
+            // reports/page.tsx sebelumnya - output KEPOTONG karena file
+            // terlalu besar. "Unterminated string/template literal" SELALU
+            // berarti truncation, TIDAK PEDULI berapa banyak baris error -
+            // treat sebagai severe otomatis supaya dapat maxTokens besar +
+            // regenerate bersih, bukan cuma di-tambal.
+            const hasUnterminatedLiteral = /Unterminated (string|template) literal/i.test(
+              errorLog.split('\n').filter((line) => line.includes(path)).join('\n'),
+            );
+            const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD || hasUnterminatedLiteral;
             const isComponentPropFix = componentFilesToFix.includes(path);
             const isTypeConflictFix = typeConflictFiles.includes(path) && !isComponentPropFix;
 
