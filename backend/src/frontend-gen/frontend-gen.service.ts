@@ -386,7 +386,23 @@ export class FrontendGenService {
             const hasUnterminatedLiteral = /Unterminated (string|template) literal/i.test(
               errorLog.split('\n').filter((line) => line.includes(path)).join('\n'),
             );
-            const isSeverelyBroken = errorCountForPath >= SEVERE_ERROR_THRESHOLD || hasUnterminatedLiteral;
+            // Fix LEBIH ROBUST (postmortem: fix "Unterminated literal" di
+            // atas SEBELUMNYA cuma cocokkan teks itu spesifik - ternyata
+            // truncation file besar bisa muncul sebagai KODE ERROR LAIN
+            // juga tergantung PERSIS di mana output terpotong (mis.
+            // InputField.tsx 1307 baris kena "TS1110: Type expected", BUKAN
+            // "Unterminated..."). Deteksi truncation LEBIH UNIVERSAL: kalau
+            // baris error untuk file ini ada DI DEKAT BARIS TERAKHIR file
+            // (dalam 5 baris dari akhir), itu tanda kuat output KEPOTONG di
+            // ujung - apapun kode error TS-nya - regardless kata "Unterminated"
+            // muncul atau tidak.
+            const currentContentLines = (original ?? '').split('\n').length;
+            const errorLineNumbers = [...errorLog.matchAll(new RegExp(`${path.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')}\\((\\d+),`, 'g'))].map(
+              (m) => Number(m[1]),
+            );
+            const hasErrorNearFileEnd = errorLineNumbers.some((lineNum) => currentContentLines - lineNum <= 5);
+            const isSeverelyBroken =
+              errorCountForPath >= SEVERE_ERROR_THRESHOLD || hasUnterminatedLiteral || hasErrorNearFileEnd;
             const isComponentPropFix = componentFilesToFix.includes(path);
             const isTypeConflictFix = typeConflictFiles.includes(path) && !isComponentPropFix;
 
