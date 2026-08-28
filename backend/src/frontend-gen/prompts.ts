@@ -372,6 +372,15 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   SATU argumen objek "{ teamId: string; supervisorId: string; note?:
   string }" — BUKAN 2 argumen terpisah), "onCancel" (function). JANGAN
   pakai nama prop "onAssign" - konsisten pakai "onSubmit".
+- COMPONENT Table WAJIB SATU API SAJA - PROPS columns/data, BUKAN
+  compound-component (postmortem FATAL: file lain pakai pola
+  "<Table><Table.Row><Table.Cell>...</Table.Cell></Table.Row></Table>",
+  padahal Table didefinisikan sebagai function component biasa terima
+  props "columns"+"data" - dua pola ini TIDAK BISA digabung). Table
+  HANYA BOLEH dipakai dengan cara "<Table columns={...} data={...}
+  onRowClick={...} />" - Table TIDAK PUNYA sub-component "Table.Row"/
+  "Table.Cell"/"Table.Body" APAPUN. JANGAN generate atau pakai pola
+  compound-component untuk Table di file manapun.
 - COMPONENT Table GENERIC TYPE PARAMETER JANGAN DIBATASI KE
   "Record<string, unknown>" (postmortem FATAL: 4 file BERBEDA gagal build
   "Type 'AuditLog'/'ReportHistoryItem'/'RosterEntry'/'UserTableUser' does
@@ -385,6 +394,17 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   JANGAN PERNAH "T extends Record<string, unknown>" (itu MEMAKSA semua
   data yang dipakai Table punya index signature, hampir tidak pernah
   cocok dengan interface domain biasa).
+- LARANGAN "Record<string, unknown>" INI BERLAKU DI SEMUA FUNGSI GENERIC
+  APAPUN, BUKAN CUMA Table (postmortem FATAL BERULANG: error yang SAMA
+  PERSIS muncul lagi di function lain seperti "updateFormField" atau
+  hook custom untuk form state - "SwapRequestFormData"/
+  "ReportGeneratorFormData"/"GenerateRosterRequest" semuanya gagal karena
+  alasan yang SAMA PERSIS). CONTOH SALAH (JANGAN PERNAH tulis begini):
+  "function updateField<T extends Record<string, unknown>>(data: T, key:
+  string, value: unknown): T". CONTOH BENAR: "function updateField<T
+  extends object>(data: T, key: keyof T, value: T[keyof T]): T" - selalu
+  pakai "T extends object" (paling longgar) untuk fungsi generic form-
+  helper, JANGAN PERNAH "Record<string, unknown>" di mana pun.
 - FIELD TANGGAL DI TYPE DOMAIN WAJIB BERTIPE "string", JANGAN "Date"
   (postmortem FATAL: berulang kali "Type 'string' is not assignable to
   type 'Date'" - data tanggal dari Backend API SELALU berbentuk string
