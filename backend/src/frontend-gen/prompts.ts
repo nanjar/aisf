@@ -207,6 +207,22 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   string) — ini pola React paling umum dipakai file lain secara alami.
   Kalau memang perlu prop "label" juga (mis. untuk aksesibilitas), buat
   keduanya optional dan render salah satu (children diutamakan kalau ada).
+- SEMUA PROP "children" DI COMPONENT SHARED WAJIB OPTIONAL
+  ("children?: React.ReactNode"), TIDAK PERNAH WAJIB (postmortem FATAL:
+  aturan "component harus terima children" di atas kadang disalahartikan
+  jadi children WAJIB diisi - bikin error "Property 'children' is
+  missing in type" di component seperti ChartCard yang render kontennya
+  dari prop DATA-DRIVEN seperti "data"/"title", BUKAN dari children, jadi
+  banyak file WAJAR TIDAK mengirim children sama sekali ke component
+  seperti itu). Aturan children di atas HANYA berarti "SEDIAKAN opsi
+  children KALAU cocok" - bukan "children WAJIB selalu diisi pemakainya".
+- Component ChartCard (untuk render grafik/chart, BEDA dari Card teks
+  biasa) WAJIB terima props: "title" (string), "data" (array data untuk
+  chart - bentuk fleksibel sesuai jenis chart), "type" (optional, mis.
+  "bar"|"line"|"pie"), "children" (OPTIONAL React.ReactNode - custom
+  chart content kalau tidak pakai "data"/"type" bawaan, JANGAN WAJIB).
+  ChartCard render grafik dari prop "data" secara default, children cuma
+  untuk override kalau perlu custom rendering.
 - Alert WAJIB JUGA TERIMA PROP "action" (optional React.ReactNode)
   (postmortem FATAL: 3 file BERBEDA kirim prop "action" ke Alert - biasanya
   tombol/link tambahan di samping pesan alert - tapi AlertProps tidak
