@@ -249,6 +249,18 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   dst, SAMAKAN dengan definisi ShiftType di lib/types.ts), "size"
   (optional), "showIcon" (optional boolean), "className" (optional
   string).
+- Component StatusBadge (KHUSUS untuk status generik seperti
+  ACTIVE/INACTIVE/PENDING, BEDA dari Badge biasa) WAJIB TERIMA "children"
+  JUGA, SAMA SEPERTI Badge (postmortem FATAL: file lain kirim children
+  teks ke StatusBadge, "<StatusBadge status={x}>{label}</StatusBadge>",
+  tapi StatusBadge yang dibuat TIDAK terima children - cuma terima
+  "status" tanpa cara override teks tampilan). StatusBadge WAJIB terima
+  props: "status" (string, value status mentah dari data - dipakai untuk
+  tentukan warna otomatis), "children" (optional React.ReactNode - teks
+  yang ditampilkan; kalau tidak diisi, StatusBadge tampilkan "status" apa
+  adanya sebagai fallback), "variant" (optional, override otomatis warna
+  dari status kalau perlu), "size" (optional), "showIcon" (optional
+  boolean), "className" (optional string).
 - Component RotationPatternSelector WAJIB terima prop bernama PERSIS
   "value" (postmortem FATAL: 2 file BERBEDA panggil dengan
   "selectedPatternId" tapi component-nya minta "value" - inkonsisten
