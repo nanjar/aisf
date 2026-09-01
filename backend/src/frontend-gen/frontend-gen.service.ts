@@ -400,7 +400,20 @@ export class FrontendGenService {
             const errorLineNumbers = [...errorLog.matchAll(new RegExp(`${path.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')}\\((\\d+),`, 'g'))].map(
               (m) => Number(m[1]),
             );
-            const hasErrorNearFileEnd = errorLineNumbers.some((lineNum) => currentContentLines - lineNum <= 5);
+            // Fix BUG (postmortem FATAL: heuristik "dekat akhir file" di
+            // atas TIDAK mempertimbangkan UKURAN file sama sekali - untuk
+            // file KECIL (mis. 25 baris), error di baris 20 otomatis
+            // dianggap "dekat akhir" (25-20=5) walau itu BUKAN truncation,
+            // cuma bug lupa-import biasa. Ini salah-picu jalur "regenerate
+            // dari nol" untuk BANYAK file kecil yang seharusnya cukup
+            // di-repair biasa - regenerate dari nol jadi "undian ulang"
+            // yang kadang balik lupa import lagi, alih-alih perbaikan
+            // TERARAH berdasar error spesifik. WAJIBKAN file benar-benar
+            // besar (>200 baris) dulu sebelum heuristik ini berlaku -
+            // truncation akibat maxTokens HANYA relevan untuk file besar,
+            // file kecil TIDAK PERNAH kena limit token sama sekali.
+            const hasErrorNearFileEnd =
+              currentContentLines > 200 && errorLineNumbers.some((lineNum) => currentContentLines - lineNum <= 5);
             const isSeverelyBroken =
               errorCountForPath >= SEVERE_ERROR_THRESHOLD || hasUnterminatedLiteral || hasErrorNearFileEnd;
             const isComponentPropFix = componentFilesToFix.includes(path);
