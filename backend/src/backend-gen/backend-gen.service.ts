@@ -27,7 +27,17 @@ const MAX_HEALING_ROUNDS = 3; // selaras dengan MAX_SELF_HEALING_ATTEMPTS di Val
 /** Safety net kalau LLM tetap bungkus output pakai code fence — sama seperti uiux.service.ts. */
 function stripCodeFence(content: string): string {
   let text = content.trim();
-  text = text.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
+  const fenceMatch = text.match(/```[a-zA-Z0-9_-]*\r?\n/);
+  if (fenceMatch && fenceMatch.index !== undefined) {
+    // Fix BUG PROVIDER LAGI (postmortem FATAL: LLM kadang tambahkan
+    // KALIMAT PEMBUKA sebelum code fence, mis. "Here is the complete
+    // `app/dashboard/page.tsx` file..." - regex lama cuma cek fence di
+    // POSISI PALING AWAL (anchor ^), jadi kalau ada teks pengantar
+    // sebelumnya, SELURUH preamble ikut ketulis sebagai kode dan bikin
+    // puluhan error syntax mulai baris 1. Cari fence DI MANA SAJA,
+    // buang semua sebelum dan termasuk fence itu sendiri.
+    text = text.slice(fenceMatch.index + fenceMatch[0].length);
+  }
   text = text.replace(/\r?\n?```\s*$/, '');
   // Fix BUG PROVIDER, DIPERLUAS (postmortem FATAL: DeepSeek membocorkan
   // sisa sintaks tool-calling internalnya ke DALAM content response,
