@@ -51,6 +51,21 @@ function stripCodeFence(content: string): string {
   let text = content.trim();
   text = text.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
   text = text.replace(/\r?\n?```\s*$/, '');
+  // Fix BUG PROVIDER (postmortem FATAL: DeepSeek membocorkan token internal
+  // protokol tool-calling miliknya sendiri ke DALAM content response -
+  // muncul sebagai "</｜｜DSML｜｜ parameter>", "invoke>", "calls>" dst,
+  // memakai karakter PIPA FULL-WIDTH "｜" (U+FF5C) yang TIDAK PERNAH
+  // muncul di kode JS/TS/JSX asli - jadi kemunculannya 100% sinyal
+  // kebocoran ini, bukan kode sungguhan. Efeknya: puluhan file BERBEDA
+  // (Button.tsx, Input.tsx, Tabs.tsx, dst) semua gagal compile dengan
+  // "Invalid character"/"Declaration or statement expected" di ujung
+  // file, karena sampah token ini nempel setelah kode valid selesai.
+  // Potong SEMUA yang muncul dari karakter "｜" pertama dan seterusnya -
+  // apapun tag/kata sesudahnya, karena itu bukan bagian kode kita.
+  const leakIndex = text.indexOf('｜');
+  if (leakIndex !== -1) {
+    text = text.slice(0, leakIndex);
+  }
   return text.trim();
 }
 
