@@ -5,6 +5,7 @@ import { QwenProvider } from './providers/qwen.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { OpenRouterProvider } from './providers/openrouter.provider';
 import { ClaudeProvider } from './providers/claude.provider';
+import { OpenAIProvider } from './providers/openai.provider';
 import { GenerationRequest, GenerationResponse, LLMProvider } from './types';
 
 /**
@@ -29,6 +30,7 @@ export class LLMService {
     gemini: GeminiProvider,
     openrouter: OpenRouterProvider,
     claude: ClaudeProvider,
+    openai: OpenAIProvider,
   ) {
     this.providers = new Map<string, LLMProvider>([
       [deepseek.name, deepseek],
@@ -36,6 +38,7 @@ export class LLMService {
       [gemini.name, gemini],
       [openrouter.name, openrouter],
       [claude.name, claude],
+      [openai.name, openai],
     ]);
     this.defaultProviderName = this.config.get<string>('LLM_DEFAULT_PROVIDER', 'deepseek');
   }
