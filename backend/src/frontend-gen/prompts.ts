@@ -511,7 +511,23 @@ dibutuhkan file lain nanti):
 - Baca SELURUH UI/UX Design Specification dan Backend API Contract
   dengan teliti SEBELUM menulis type - list semua field yang disebut di
   mockup/wireframe/response API untuk entity yang sama, gabungkan semua
-  jadi 1 interface yang lengkap.\n`;
+  jadi 1 interface yang lengkap.
+- Type "PaginatedResponse<T>" (generic pembungkus response berpaginasi,
+  dipakai untuk daftar leave-requests/notifications/reports/dst) WAJIB
+  berisi field PERSIS: "items" (T[], daftar data), "total" (number, total
+  seluruh data tanpa pagination), "totalPages" (number), "page" (number,
+  halaman aktif), "pageSize" (number). Field "total"/"totalPages" SERING
+  KELUPAAN padahal HAMPIR SEMUA halaman list pakai untuk render info
+  "menampilkan X dari Y" dan navigasi halaman - JANGAN pernah lewatkan.
+- Type "SwapRequest" WAJIB LENGKAP mencakup field-field berikut (postmortem
+  FATAL: SwapApprovalModal.tsx DAN app/dashboard/page.tsx sama-sama
+  butuh field ini tapi lib/types.ts sering cuma isi sebagian): "id",
+  "status", "date" (tanggal shift yang mau ditukar), "requesterName"
+  (nama yang minta swap), "employeeName" (optional, alias/field terkait
+  requester tergantung konteks tampilan), "targetName" (nama yang dituju
+  swap), "currentShiftType" (ShiftType, shift asal), "requestedShiftType"
+  (ShiftType, shift yang diinginkan), "reason" (optional string).
+\n`;
 
 const API_CLIENT_HINT = `\nPENTING soal lib/api.ts (postmortem FATAL: file ini digenerate PALING
 AWAL, sebelum page/component lain yang akan MEMAKAINYA — puluhan file lain
