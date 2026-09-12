@@ -474,6 +474,22 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   (format, bandingkan, dst) di dalam component, convert ke "new Date(...)"
   SAAT DIPAKAI SAJA secara lokal, JANGAN simpan sebagai Date di
   state/props/interface.
+- SETIAP COMPONENT YANG MENERIMA PROP APAPUN WAJIB PUNYA INTERFACE PROPS
+  BERNAMA EKSPLISIT (postmortem FATAL: puluhan error "IntrinsicAttributes"
+  "Property 'X' does not exist on type 'IntrinsicAttributes'" - component
+  BERBEDA-BEDA nama, semuanya sebenarnya di-generate TANPA parameter
+  props/interface Props SAMA SEKALI, mis. "function Breadcrumb() {...}"
+  padahal file lain memakainya dengan kirim prop "items", atau
+  "function SwapRequestCard() {...}" padahal dipakai dengan prop
+  "request"). SEBELUM selesai generate SATU component, tanyakan diri
+  sendiri: "apakah ada file lain yang akan MEMAKAI component ini dengan
+  mengirim prop tertentu?" — kalau ya (hampir selalu ya untuk component
+  di folder components/, KECUALI benar-benar tidak butuh data eksternal
+  sama sekali), WAJIB deklarasikan "interface XxxProps { ... }" dan
+  destructure props itu di parameter function
+  ("function Xxx({ prop1, prop2 }: XxxProps) {...}") — JANGAN PERNAH
+  "function Xxx() {...}" tanpa parameter kalau component ini dipakai
+  dengan kirim prop apapun di file lain manapun dalam project ini.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
