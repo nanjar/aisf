@@ -559,7 +559,18 @@ lengkap mencakup semua endpoint Backend API Contract):
   "import axios from 'axios'; const api = axios.create({ baseURL:
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:6001' });" lalu
   panggil "api.get(...)" / "api.post(...)" dst langsung ke variabel "api"
-  itu di setiap function endpoint. Sesederhana mungkin.\n`;
+  itu di setiap function endpoint. Sesederhana mungkin.
+- UNTUK FILE LAIN YANG MEMAKAI lib/api.ts (page/component manapun): WAJIB
+  import NAMED FUNCTION spesifik yang dibutuhkan, mis.
+  "import { getShifts, createShift } from '@/lib/api'" (postmortem FATAL:
+  banyak file malah "import api from '@/lib/api'" lalu panggil
+  "api.getShifts()"/"api.updateShift()" dst, seolah lib/api.ts export
+  default sebuah CLIENT OBJECT dengan method per-resource — PADAHAL
+  lib/api.ts export axios instance polos (tidak punya method custom
+  apapun) TERPISAH dari named function per endpoint. TIDAK ADA
+  "api.getShifts()" atau pola sejenis di project ini - HANYA
+  "import { getShifts } from '@/lib/api'" lalu panggil "getShifts()"
+  langsung sebagai function biasa.\n`;
 
 const PACKAGE_JSON_HINT = `\nPENTING soal dependency: HANYA gunakan nama package npm yang BENAR-BENAR
 ADA dan yakin benar (mis. "next", "react", "react-dom", "tailwindcss",
