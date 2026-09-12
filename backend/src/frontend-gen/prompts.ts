@@ -490,6 +490,26 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   ("function Xxx({ prop1, prop2 }: XxxProps) {...}") — JANGAN PERNAH
   "function Xxx() {...}" tanpa parameter kalau component ini dipakai
   dengan kirim prop apapun di file lain manapun dalam project ini.
+- Component NotificationList WAJIB terima prop bernama PERSIS
+  "notifications" (array Notification[]) (postmortem FATAL: component ini
+  BERULANG KALI di-generate dengan Props salah - kadang tanpa Props sama
+  sekali, kadang cuma terima "notification" tunggal padahal dipakai
+  dengan array "notifications" jamak). NotificationList WAJIB terima
+  props: "notifications" (Notification[]), "onItemClick" (optional,
+  function menerima 1 argumen Notification), "onMarkRead" (optional,
+  function menerima 1 argumen string id).
+- SEMUA COMPONENT FORM (mis. UserSettingsForm, ShiftForm, dst) WAJIB
+  TYPING PROP "onSubmit" DENGAN TYPE FORM-DATA SPESIFIKNYA, JANGAN
+  "Record<string, unknown>" (postmortem FATAL: berulang kali "Type
+  'XxxFormData' is not assignable to type 'Record<string, unknown>' -
+  Index signature ... is missing" - SEKALIPUN sudah dilarang di aturan
+  generic sebelumnya, kasus INI SPESIFIK muncul lagi di typing PROP
+  "onSubmit" pada component form, bukan di function generic biasa).
+  Component form WAJIB deklarasikan
+  "interface XxxFormProps { onSubmit: (data: XxxFormData) => void |
+  Promise<void>; ... }" - "XxxFormData" WAJIB import dari lib/types.ts
+  (atau didefinisikan LENGKAP di file sendiri kalau memang lokal), JANGAN
+  PERNAH generic "Record<string, unknown>" di signature onSubmit.
 - WAJIB IMPORT SEMUA YANG DIPAKAI, TANPA KECUALI (postmortem FATAL: puluhan
   file pakai useState/useMemo/component custom seperti Button/Badge/Avatar
   TANPA satu baris import pun — file "berjalan" seolah semua itu global,
