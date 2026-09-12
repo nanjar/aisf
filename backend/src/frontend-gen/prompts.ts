@@ -419,6 +419,32 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
     reminderMinutesBefore: number;
   }
   SEMUA field WAJIB ADA PERSIS dengan nama ini, TIDAK BOLEH dihilangkan
+- Type "ProfileFormData" (di lib/types.ts) WAJIB PERSIS berbentuk berikut,
+  TIDAK ADA VARIASI LAIN (postmortem FATAL PALING SERING TERULANG SETARA
+  UserSettingsFormData: field "name" vs "fullName" ketuker terus-menerus,
+  ProfileForm.tsx dan app/profile/page.tsx SAMA-SAMA butuh field ini):
+  {
+    name: string;
+    email: string;
+    phoneNumber: string;
+    employeeNumber: string;
+    department: string;
+    position: string;
+  }
+  PAKAI "name" (BUKAN "fullName"), PAKAI "phoneNumber" (BUKAN "phone").
+  SEMUA field WAJIB ADA PERSIS dengan nama ini, TIDAK BOLEH dihilangkan.
+  Type "AuthUser"/"User" (data user yang login) JUGA WAJIB sertakan field
+  "phone", "employeeId" (BEDA nama dari ProfileFormData - AuthUser pakai
+  "phone"/"employeeId", ProfileFormData pakai "phoneNumber"/
+  "employeeNumber" - JANGAN disamakan), "department", "position" - dipakai
+  utnuk isi initial value form profile dari data user yang sedang login.
+- Component Pagination WAJIB PUNYA interface Props EKSPLISIT dengan field
+  PERSIS: "currentPage" (number), "totalPages" (number), "onPageChange"
+  (function menerima 1 argumen number halaman baru), "pageSize" (optional
+  number), "totalItems" (optional number) (postmortem FATAL BERULANG:
+  Pagination SERING di-generate TANPA parameter/Props sama sekali walau
+  SEMUA halaman list - leave-requests/notifications/reports/swap-requests -
+  konsisten kirim prop-prop ini).
   satupun walau terasa tidak relevan - UserSettingsForm.tsx akan pakai
   SEMUA field ini untuk render toggle/input pengaturan notifikasi user.
 - TYPE DOMAIN (Team, TeamMember, RosterEntry, CalendarAssignment, Shift,
