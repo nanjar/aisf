@@ -56,6 +56,16 @@ function stripCodeFence(content: string): string {
   if (leakMatch && leakMatch.index !== undefined) {
     text = text.slice(0, leakMatch.index);
   }
+  // Fix BUG PROVIDER LAGI (postmortem FATAL: LLM kadang tambahkan SATU
+  // closing tag NYASAR setelah kurung kurawal penutup function/component -
+  // mis. "}" diikuti "</div>" sendirian di baris terakhir, padahal JSX di
+  // dalam function sudah benar-benar lengkap/seimbang. Kalau baris
+  // TERAKHIR (setelah trim) berbentuk PERSIS "}" lalu baris SESUDAHNYA
+  // cuma closing tag HTML/JSX sendirian, itu jelas sampah - potong.
+  const strayTagMatch = text.match(/\}\s*\n\s*<\/[a-zA-Z][a-zA-Z0-9]*>\s*$/);
+  if (strayTagMatch && strayTagMatch.index !== undefined) {
+    text = text.slice(0, strayTagMatch.index + 1);
+  }
   return text.trim();
 }
 
