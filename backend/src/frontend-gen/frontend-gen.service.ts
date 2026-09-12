@@ -382,6 +382,12 @@ export class FrontendGenService {
         // pola "XxxProps" di error, cari file component "Xxx.tsx" yang
         // cocok, WAJIB diperbaiki LEBIH DULU sebelum coba fix consumer.
         const componentFilesToFix = this.resolveComponentPropMismatches(errorLog, knownPaths);
+        // Fix BARU: tangkap kasus "IntrinsicAttributes" yang tidak
+        // kedeteksi oleh resolveComponentPropMismatches (lihat komentar
+        // fungsinya) - gabungkan ke componentFilesToFix yang SAMA supaya
+        // otomatis lewat jalur repair "component prop fix" yang sudah ada.
+        const intrinsicAttrFiles = this.resolveIntrinsicAttributesErrors(errorLog, knownPaths, fileContents);
+        for (const p of intrinsicAttrFiles) if (!componentFilesToFix.includes(p)) componentFilesToFix.push(p);
         for (const p of componentFilesToFix) if (!brokenPaths.includes(p)) brokenPaths.push(p);
 
         // Fix kritikal BARU LAGI (postmortem: error konflik TYPE DOMAIN
@@ -779,6 +785,61 @@ export class FrontendGenService {
       const componentName = match[1]; // mis. "Badge", "ConfirmDialog", "Toast"
       const componentPath = componentFileByLowerStem.get(componentName.toLowerCase());
       if (componentPath) found.add(componentPath);
+    }
+
+    return [...found];
+  }
+
+  /**
+   * Fix kritikal BARU LAGI, LEBIH PENTING (postmortem FATAL: puluhan error
+   * "Type '{ children: string; variant: string; title: string; }' is not
+   * assignable to type 'IntrinsicAttributes'" - component SEPERTI Alert/
+   * EmptyState di-generate TANPA parameter/Props SAMA SEKALI (bukan Props
+   * yang salah bentuk - Props-nya TIDAK ADA SAMA SEKALI). Karena error
+   * "IntrinsicAttributes" TIDAK PERNAH sebut nama "XxxProps" di teksnya,
+   * resolveComponentPropMismatches() di atas SAMA SEKALI TIDAK BISA
+   * mendeteksi file mana yang perlu diperbaiki - inilah kenapa self-healing
+   * gagal 3 ronde berturut-turut untuk kasus ini. Solusi: baca BARIS ERROR
+   * di FILE KONSUMEN (mis. "components/LoginForm.tsx(52,10)"), ambil isi
+   * baris itu dari fileContents, cari nama TAG JSX yang dipakai di situ
+   * (mis. "<Alert ...") - itulah nama component SUMBER yang props-nya
+   * kosong dan harus diperbaiki.
+   */
+  private resolveIntrinsicAttributesErrors(
+    errorLog: string,
+    knownPaths: string[],
+    fileContents: Map<string, string>,
+  ): string[] {
+    const found = new Set<string>();
+    const componentFileByLowerStem = new Map<string, string>();
+    for (const p of knownPaths) {
+      const match = p.match(/(?:^|\/)components\/([^/]+)\.tsx?$/i);
+      if (match) componentFileByLowerStem.set(match[1].toLowerCase(), p);
+    }
+
+    // Cocok baris error yang diikuti "is not assignable to type
+    // 'IntrinsicAttributes'" di baris SETELAHNYA (format tsc: pesan utama
+    // di 1 baris, detail "Property 'x' does not exist..." di baris
+    // berikutnya, tapi kita cuma perlu baris PERTAMA untuk lokasi).
+    const pattern = /([^\s(]+\.tsx?)\((\d+),(\d+)\):\s*error\s+TS2322:[^\n]*IntrinsicAttributes/g;
+    for (const match of errorLog.matchAll(pattern)) {
+      const consumerPath = match[1].replace(/^\/workspace\//, '');
+      const lineNum = Number(match[2]);
+      const consumerContent = fileContents.get(consumerPath);
+      if (!consumerContent) continue;
+
+      const lines = consumerContent.split('\n');
+      // Cari ke belakang mulai dari baris error - JSX tag pembuka bisa
+      // ada beberapa baris SEBELUM baris yang persis disebut error (kalau
+      // prop-nya ditulis multi-baris), maksimal mundur 5 baris.
+      for (let i = lineNum - 1; i >= Math.max(0, lineNum - 6); i--) {
+        const tagMatch = lines[i]?.match(/<([A-Z][A-Za-z0-9]*)\b/);
+        if (tagMatch) {
+          const componentPath = componentFileByLowerStem.get(tagMatch[1].toLowerCase());
+          if (componentPath) found.add(componentPath);
+          break;
+        }
+      }
     }
 
     return [...found];
