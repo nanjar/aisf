@@ -400,6 +400,27 @@ const OUTPUT_RULES = `ATURAN KETAT OUTPUT:
   string}), "showToast" (function(message: string, variant: string) buat
   tambah toast baru), "dismissToast" (function(id: string) buat hapus 1
   toast tertentu berdasar id).
+- Type "UserSettingsFormData" (di lib/types.ts) WAJIB PERSIS berbentuk
+  berikut, TIDAK ADA VARIASI LAIN, TIDAK BOLEH KURANG SATU FIELD PUN
+  (postmortem FATAL PALING SERING TERULANG: field-nya BEDA-BEDA tiap kali
+  digenerate ulang - kadang "emailNotifications", kadang
+  "pushNotifications" doang, kadang "dateFormat" kelupaan - UserSettingsForm.tsx
+  butuh SEMUA field di bawah ini SEKALIGUS):
+  {
+    language: "id" | "en";
+    theme: "light" | "dark" | "system";
+    dateFormat: string;
+    emailNotifications: boolean;
+    pushNotifications: boolean;
+    swapRequestAlerts: boolean;
+    leaveRequestAlerts: boolean;
+    rosterPublishedAlerts: boolean;
+    reminderBeforeShift: boolean;
+    reminderMinutesBefore: number;
+  }
+  SEMUA field WAJIB ADA PERSIS dengan nama ini, TIDAK BOLEH dihilangkan
+  satupun walau terasa tidak relevan - UserSettingsForm.tsx akan pakai
+  SEMUA field ini untuk render toggle/input pengaturan notifikasi user.
 - TYPE DOMAIN (Team, TeamMember, RosterEntry, CalendarAssignment, Shift,
   User, dst) WAJIB DIDEFINISIKAN SATU KALI SAJA DAN DIPAKAI ULANG - JANGAN
   redefinisi type yang sama di banyak file dengan shape berbeda-beda
